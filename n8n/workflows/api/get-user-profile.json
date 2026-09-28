@@ -1,0 +1,196 @@
+{
+  "name": "GET_USER_PROFILE",
+  "nodes": [
+    {
+      "id": "701120d0-c557-4d09-8541-56b363dfde97",
+      "name": "Webhook GET profile",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        96
+      ],
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "profile",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "webhookId": "d98791f3-cd1a-4053-a2fa-1159a74e4aa4"
+    },
+    {
+      "id": "456de2c2-4148-4837-8799-2caf48e82630",
+      "name": "Find User",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        224,
+        96
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "users",
+          "cachedResultName": "users"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "auth_user_id",
+              "condition": "eq",
+              "keyValue": "={{ $json.query.auth_user_id }}"
+            }
+          ]
+        },
+        "returnAll": false,
+        "limit": 1
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "7e74a880-02a5-4fd6-b9e0-96337b04c2a9",
+      "name": "User Exists",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        448,
+        96
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "user-exists-cond",
+              "leftValue": "={{ ($json.id ?? \"\").toString() }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "01fe304f-8798-403d-957b-1af605a6e8f4",
+      "name": "Assemble Profile",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const u = $('Find User').first().json;\n\nfunction parseArr(v) {\n  if (v === null || v === undefined || v === '') return [];\n  if (Array.isArray(v)) return v;\n  try {\n    const parsed = JSON.parse(v);\n    return Array.isArray(parsed) ? parsed : [];\n  } catch (e) {\n    return [];\n  }\n}\n\nconst targetRoles = parseArr(u.target_roles_json);\n\nconst profile = {\n  id: u.auth_user_id ?? null,\n  first_name: u.first_name ?? null,\n  last_name: u.last_name ?? null,\n  email: u.email ?? null,\n  location: u.location ?? null,\n  country: u.country ?? null,\n  // \"Position of interest\" — the roles the user targets\n  positions_of_interest: targetRoles,\n  position_of_interest: targetRoles.length ? targetRoles[0] : null,\n  // Resume: only the extracted text is stored. No PDF file/URL exists yet.\n  resume: {\n    text: u.cv_text ?? null,\n    file_url: null,\n    file_name: null,\n  },\n};\n\nreturn [{ json: { success: true, profile } }];"
+      }
+    },
+    {
+      "id": "202b7523-7ada-448f-9247-2a81022d3d68",
+      "name": "Respond Profile",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        896,
+        0
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseCode": 200
+        }
+      }
+    },
+    {
+      "id": "1a112b84-f348-4d53-b6b7-051350c03b25",
+      "name": "Respond Not Found",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        672,
+        192
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\"success\":false,\"error\":\"user_not_found\",\"profile\":null}",
+        "options": {
+          "responseCode": 404
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook GET profile": {
+      "main": [
+        [
+          {
+            "node": "Find User",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find User": {
+      "main": [
+        [
+          {
+            "node": "User Exists",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "User Exists": {
+      "main": [
+        [
+          {
+            "node": "Assemble Profile",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Not Found",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Assemble Profile": {
+      "main": [
+        [
+          {
+            "node": "Respond Profile",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}

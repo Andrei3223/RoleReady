@@ -1,0 +1,17 @@
+{
+    "name": "career-agent",
+    "version": "0.1.0",
+    "type": "module",
+    "description": "Apify Actor that runs the Career Agent n8n pipeline (vacancies, interview prep, referrals, course) through its public webhooks.",
+    "main": "src/main.js",
+    "engines": { "node": ">=20" },
+    "dependencies": {
+        "apify": "^3.7.2",
+        "apify-client": "^2.25.0"
+    },
+    "scripts": {
+        "start": "node src/main.js",
+        "test:mock": "node test/mock-n8n.js"
+    },
+    "license": "UNLICENSED"
+}

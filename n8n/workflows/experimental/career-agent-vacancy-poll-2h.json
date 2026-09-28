@@ -1,0 +1,136 @@
+{
+  "name": "Career Agent — Vacancy Poll (2h)",
+  "nodes": [
+    {
+      "id": "cd4d74ab-6c6c-4081-a910-4a6c5e837659",
+      "name": "Every 2 Hours",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 2
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "5341e598-6a5b-4f3a-8122-a2b41eed871f",
+      "name": "Get Active Users",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        224,
+        0
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Career Users",
+          "cachedResultName": "Career Users"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "is_active",
+              "condition": "eq",
+              "keyValue": "={{ true }}"
+            }
+          ]
+        },
+        "returnAll": true
+      }
+    },
+    {
+      "id": "5bd9eb84-a51c-494b-a205-6ffc7d6d2384",
+      "name": "Apify MCP (Placeholder)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "language": "javaScript",
+        "jsCode": "// PLACEHOLDER for the Apify MCP node.\n// The real node will run a job search for this user's job_title.\nconst user = $json;\nconst jobTitle = user.job_title || 'Unknown role';\nconst location = user.location || 'Anywhere';\n\nconst vacancies = [\n  {\n    title: jobTitle,\n    company: 'Acme Corp',\n    location,\n    url: 'https://example.com/jobs/1',\n    source: 'apify-placeholder',\n  },\n  {\n    title: jobTitle + ' II',\n    company: 'Globex',\n    location,\n    url: 'https://example.com/jobs/2',\n    source: 'apify-placeholder',\n  },\n];\n\nreturn {\n  external_id: user.external_id,\n  full_name: user.full_name,\n  email: user.email,\n  job_title: jobTitle,\n  location,\n  work_mode: user.work_mode,\n  vacancy_count: vacancies.length,\n  vacancies,\n};"
+      }
+    },
+    {
+      "id": "02d03909-a005-469c-ada1-112ea3637d31",
+      "name": "Loop Over Users",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        448,
+        0
+      ],
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Every 2 Hours": {
+      "main": [
+        [
+          {
+            "node": "Get Active Users",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Active Users": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Users",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Apify MCP (Placeholder)": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Users",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Users": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Apify MCP (Placeholder)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}

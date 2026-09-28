@@ -1,0 +1,238 @@
+{
+  "name": "GET_REFERRALS",
+  "nodes": [
+    {
+      "id": "29e3e429-da58-47f1-962b-d5bf27e7d94e",
+      "name": "Webhook GET referrals",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        96
+      ],
+      "parameters": {
+        "path": "referrals",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "webhookId": "282eb5fa-7392-4ce9-a709-7843393cd83e"
+    },
+    {
+      "id": "d6e678f0-fbb4-4cc6-88e3-55aa6ec92e3e",
+      "name": "Find User",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        224,
+        96
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "users",
+          "cachedResultName": "users"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "auth_user_id",
+              "condition": "eq",
+              "keyValue": "={{ $json.query.auth_user_id }}"
+            }
+          ]
+        },
+        "returnAll": false,
+        "limit": 1
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "dc6dd91b-15f2-4827-bb25-a4bcf917e595",
+      "name": "User Exists",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        448,
+        96
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "user-exists-cond",
+              "leftValue": "={{ ($json.id ?? \"\").toString() }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "9d97569f-49f5-4ab2-8def-f62b822c07f0",
+      "name": "Find Drafts",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        672,
+        0
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "referral_drafts",
+          "cachedResultName": "referral_drafts"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "auth_user_id",
+              "condition": "eq",
+              "keyValue": "={{ $('Webhook GET referrals').first().json.query.auth_user_id }}"
+            }
+          ]
+        },
+        "returnAll": true
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "31c1655d-3b76-4153-97fe-15aaa245eb00",
+      "name": "Assemble Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        896,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// referral_drafts rows for this user, grouped by job. Optional ?job_id= narrows to one job.\nconst q = $('Webhook GET referrals').first().json.query || {};\nconst jobFilter = String(q.job_id || '').trim();\n\nconst rows = $('Find Drafts').all().map(i => i.json).filter(r => r && r.job_id);\nconst byJob = {};\nfor (const r of rows) {\n  if (jobFilter && String(r.job_id) !== jobFilter) continue;\n  const g = byJob[r.job_id] || (byJob[r.job_id] = {\n    job_id: r.job_id, job_title: r.job_title || null, company: r.company || null, job_url: r.job_url || null,\n    status: 'no_contacts', contacts: [],\n  });\n  // marker row written by Referals when no contacts were found for this job\n  if (r.status === 'no_contacts' && !r.contact_linkedin_url && !r.contact_name) continue;\n  g.status = 'drafted';\n  g.contacts.push({\n    draft_id: r.id,                        // referral_drafts row id\n    contact_name: r.contact_name || null,\n    contact_linkedin_url: r.contact_linkedin_url || null,\n    contact_headline: r.contact_headline || null,\n    tier: r.tier || null,                  // alumni | ex_colleague | same_team | recruiter\n    score: r.score ?? 0,\n    match_reasons: String(r.match_reasons || '').split('; ').filter(Boolean),\n    email: r.email || null,\n    email_status: r.email_status || null,  // found | guessed | not_found\n    channel: r.channel || null,            // email | linkedin\n    subject: r.subject || null,\n    body: r.body || null,\n    linkedin_note: r.linkedin_note || null,\n    status: r.status || null,              // draft | needs_review | missing\n  });\n}\nconst jobs = Object.values(byJob);\nfor (const g of jobs) g.contacts.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));\njobs.sort((a, b) => b.contacts.length - a.contacts.length);\n\nreturn [{ json: {\n  success: true,\n  count: jobs.length,\n  contacts_count: jobs.reduce((s, g) => s + g.contacts.length, 0),\n  ...(jobFilter ? { job_id: jobFilter } : {}),\n  jobs,\n} }];\n"
+      }
+    },
+    {
+      "id": "a59b3fe5-1ba5-4915-acc9-801d6f894924",
+      "name": "Respond Referrals",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1120,
+        0
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseCode": 200
+        }
+      }
+    },
+    {
+      "id": "089e68ee-2868-4046-beb4-9b7a43b9358f",
+      "name": "Respond No User",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        672,
+        192
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\"success\":false,\"error\":\"user_not_found\",\"count\":0,\"jobs\":[]}",
+        "options": {
+          "responseCode": 200
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook GET referrals": {
+      "main": [
+        [
+          {
+            "node": "Find User",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find User": {
+      "main": [
+        [
+          {
+            "node": "User Exists",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "User Exists": {
+      "main": [
+        [
+          {
+            "node": "Find Drafts",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond No User",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Drafts": {
+      "main": [
+        [
+          {
+            "node": "Assemble Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Assemble Response": {
+      "main": [
+        [
+          {
+            "node": "Respond Referrals",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}

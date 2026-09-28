@@ -1,0 +1,2293 @@
+{
+  "name": "Referals",
+  "nodes": [
+    {
+      "id": "ce2fc6c4-7bda-46b8-9ee9-e21dff1548e8",
+      "name": "When clicking ‘Execute workflow’",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -2464,
+        0
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "1870d6a9-a58a-4830-a24e-5a5c488beb02",
+      "name": "When called by pipeline",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -2240,
+        -220
+      ],
+      "parameters": {
+        "inputSource": "workflowInputs",
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "auth_user_id",
+              "type": "string"
+            },
+            {
+              "name": "worker_batch",
+              "type": "object"
+            }
+          ]
+        }
+      },
+      "notes": "Entry point for the main pipeline: one item per job with { job, candidate } (settings optional). job = Filter jobs item from find vacancy."
+    },
+    {
+      "id": "141db351-5079-41f1-aba7-607243ba127d",
+      "name": "Load contacted people",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        672,
+        0
+      ],
+      "parameters": {
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "contacted_people",
+          "cachedResultName": "contacted_people"
+        },
+        "operation": "get",
+        "resource": "row",
+        "returnAll": true
+      },
+      "notes": "People already messaged are never suggested again.",
+      "alwaysOutputData": true,
+      "executeOnce": true
+    },
+    {
+      "id": "f9be3f0b-4f9e-473c-ac1d-0ade31aca595",
+      "name": "Loop companies",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        1120,
+        0
+      ],
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "notes": "One company at a time (Apify concurrency, one people search per company)."
+    },
+    {
+      "id": "47a19cc2-5e66-46ab-b658-e8afa9558fc6",
+      "name": "Job keywords",
+      "type": "@n8n/n8n-nodes-langchain.anthropic",
+      "typeVersion": 1,
+      "position": [
+        1344,
+        100
+      ],
+      "parameters": {
+        "messages": {
+          "values": [
+            {
+              "content": "=COMPANY: {{ $json.company.name }}\nCITY: {{ $json.city }}\n\nVACANCIES:\n{{ $json.jobs.map(j => '### ' + j.title + '\\n' + String(j.description || '').slice(0, 2500)).join('\\n\\n') }}",
+              "role": "user"
+            }
+          ]
+        },
+        "modelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $json.settings.model_light }}"
+        },
+        "operation": "message",
+        "options": {
+          "maxTokens": 4000,
+          "system": "You help find people at a company who work in the same team or role as an open vacancy.\nReturn ONLY a JSON object (no markdown fences, no text around it):\n{\"team_keywords\": string[], \"peer_titles\": string[]}\n- team_keywords: 3-5 short lowercase terms (1-3 words) for the team's technical domain, as people would write them in a LinkedIn headline (e.g. \"power electronics\", \"firmware\", \"process engineering\").\n- peer_titles: 2-3 common English LinkedIn job titles of people doing this job or working next to it in the same team. No seniority words (senior, lead, principal, junior)."
+        },
+        "resource": "text"
+      },
+      "notes": "Cheap model (Settings.model_light): team keywords + peer titles for Tier 3 and scoring.",
+      "credentials": {
+        "anthropicApi": {
+          "name": "Anthropic account"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 2
+    },
+    {
+      "id": "159bda2f-2653-4ce7-bf3f-72883f9c61a2",
+      "name": "Tier 1 on?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2016,
+        100
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "Tier 1 on?",
+              "leftValue": "={{ $json.run_tier1 }}",
+              "operator": {
+                "operation": "true",
+                "singleValue": true,
+                "type": "boolean"
+              },
+              "rightValue": ""
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          }
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      }
+    },
+    {
+      "id": "fb03a327-6a5c-4809-8013-60fda3d5d5de",
+      "name": "Apify: alumni search",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        2240,
+        0
+      ],
+      "parameters": {
+        "authentication": "genericCredentialType",
+        "contentType": "json",
+        "genericAuthType": "httpHeaderAuth",
+        "jsonBody": "={{ JSON.stringify($json.tier1_body) }}",
+        "method": "POST",
+        "options": {
+          "timeout": 300000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "url": "https://api.apify.com/v2/acts/harvestapi~linkedin-profile-search/run-sync-get-dataset-items"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Apify API (Header Auth)"
+        }
+      },
+      "notes": "Tier 1: current company + candidate's school. harvestapi/linkedin-profile-search, Short mode ($0.10 / page of 25).",
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true,
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "id": "44de6643-60dd-46ac-8970-4528131477af",
+      "name": "Enough?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2688,
+        100
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "Enough?",
+              "leftValue": "={{ $json.found.length >= $json.settings.min_contacts_before_next_tier }}",
+              "operator": {
+                "operation": "true",
+                "singleValue": true,
+                "type": "boolean"
+              },
+              "rightValue": ""
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          }
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "notes": "Fallback tiers only when Tier 1 found too few."
+    },
+    {
+      "id": "841a1300-484c-44c6-a079-2bbd70675890",
+      "name": "Run fallback?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        3136,
+        260
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "Run fallback?",
+              "leftValue": "={{ $json.run_fallback }}",
+              "operator": {
+                "operation": "true",
+                "singleValue": true,
+                "type": "boolean"
+              },
+              "rightValue": ""
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          }
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      }
+    },
+    {
+      "id": "c3cd5345-6784-4a20-bb40-8b5c873d6c78",
+      "name": "Apify: fallback search",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        3360,
+        200
+      ],
+      "parameters": {
+        "authentication": "genericCredentialType",
+        "contentType": "json",
+        "genericAuthType": "httpHeaderAuth",
+        "jsonBody": "={{ JSON.stringify($json.body) }}",
+        "method": "POST",
+        "options": {
+          "timeout": 300000,
+          "batching": {
+            "batch": {
+              "batchInterval": 0,
+              "batchSize": 1
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "url": "https://api.apify.com/v2/acts/harvestapi~linkedin-profile-search/run-sync-get-dataset-items"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Apify API (Header Auth)"
+        }
+      },
+      "notes": "Tier 2 (past companies) and Tier 3 (peer titles + city), one run per item.",
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true,
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "id": "7e065599-aabd-46e0-8a98-668a2128628a",
+      "name": "Enrich on?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        4032,
+        100
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "Enrich on?",
+              "leftValue": "={{ $json.settings.enrich_profiles && $json.shortlist.length > 0 }}",
+              "operator": {
+                "operation": "true",
+                "singleValue": true,
+                "type": "boolean"
+              },
+              "rightValue": ""
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          }
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      }
+    },
+    {
+      "id": "723bbe92-583d-4c2c-865b-894f326c8be5",
+      "name": "Apify: enrich profiles",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        4368,
+        -60
+      ],
+      "parameters": {
+        "authentication": "genericCredentialType",
+        "contentType": "json",
+        "genericAuthType": "httpHeaderAuth",
+        "jsonBody": "={{ JSON.stringify({ profileScraperMode: $('Score & shortlist').first().json.settings.find_emails ? 'Profile details + email search ($10 per 1k)' : 'Profile details no email ($4 per 1k)', urls: $('Score & shortlist').first().json.shortlist.map(c => c.linkedin_url) }) }}",
+        "method": "POST",
+        "options": {
+          "timeout": 300000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "url": "https://api.apify.com/v2/acts/harvestapi~linkedin-profile-scraper/run-sync-get-dataset-items"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Apify API (Header Auth)"
+        }
+      },
+      "notes": "Full profiles (+ email search) for the shortlist only. harvestapi/linkedin-profile-scraper.",
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true,
+      "executeOnce": true,
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "id": "83837ede-a617-433a-9264-f103bd562350",
+      "name": "Need email fallback?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        4704,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "Need email fallback?",
+              "leftValue": "={{ $json.need_email.length > 0 }}",
+              "operator": {
+                "operation": "true",
+                "singleValue": true,
+                "type": "boolean"
+              },
+              "rightValue": ""
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          }
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      }
+    },
+    {
+      "id": "00b65c02-6d1b-4b83-bf8f-a597596258ee",
+      "name": "Apify: company info",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        4144,
+        -60
+      ],
+      "parameters": {
+        "authentication": "genericCredentialType",
+        "contentType": "json",
+        "genericAuthType": "httpHeaderAuth",
+        "jsonBody": "={{ JSON.stringify({ companies: [$('Score & shortlist').first().json.company.url] }) }}",
+        "method": "POST",
+        "options": {
+          "timeout": 300000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "url": "https://api.apify.com/v2/acts/harvestapi~linkedin-company/run-sync-get-dataset-items"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Apify API (Header Auth)"
+        }
+      },
+      "notes": "Company website -> email domain. harvestapi/linkedin-company.",
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true,
+      "executeOnce": true,
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "id": "8f11d9df-002a-4416-b7a4-8db10a969264",
+      "name": "Domain found?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        5376,
+        -100
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "Domain found?",
+              "leftValue": "={{ $json.run_finder }}",
+              "operator": {
+                "operation": "true",
+                "singleValue": true,
+                "type": "boolean"
+              },
+              "rightValue": ""
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          }
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      }
+    },
+    {
+      "id": "f9f880fa-c7f9-4bcc-8d93-8a572ca3a338",
+      "name": "Apify: email finder",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        5600,
+        -200
+      ],
+      "parameters": {
+        "authentication": "genericCredentialType",
+        "contentType": "json",
+        "genericAuthType": "httpHeaderAuth",
+        "jsonBody": "={{ JSON.stringify($json.finder_body) }}",
+        "method": "POST",
+        "options": {
+          "timeout": 300000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "url": "https://api.apify.com/v2/acts/logiover~work-email-finder/run-sync-get-dataset-items"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Apify API (Header Auth)"
+        }
+      },
+      "notes": "Name + domain -> work email (logiover/work-email-finder). 'frequency_guess' results are marked guessed.",
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true,
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "id": "f5dbb4c5-659e-4600-a01f-7fd01f32be3d",
+      "name": "Drafts on?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        6272,
+        100
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "Drafts on?",
+              "leftValue": "={{ $json.settings.draft_messages && $json.contacts.length > 0 }}",
+              "operator": {
+                "operation": "true",
+                "singleValue": true,
+                "type": "boolean"
+              },
+              "rightValue": ""
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          }
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      }
+    },
+    {
+      "id": "95d0a3e4-12a1-4544-bf9e-1b8ac461fe3d",
+      "name": "Draft messages",
+      "type": "@n8n/n8n-nodes-langchain.anthropic",
+      "typeVersion": 1,
+      "position": [
+        6496,
+        0
+      ],
+      "parameters": {
+        "messages": {
+          "values": [
+            {
+              "content": "={{ JSON.stringify({ candidate: { name: $json.candidate.name, headline: $json.candidate.headline, linkedin_url: $json.candidate.linkedin_url, education: $json.candidate.education, experience: $json.candidate.experience, skills: $json.candidate.skills, projects: $json.candidate.projects, signature: $json.candidate.email_signature }, job: { title: $json.job.title, company: $json.job.companyName, location: $json.job.location, url: $json.job.url, description: String($json.job.description || '').slice(0, 3000) }, contacts: $json.contacts.map((c, i) => ({ id: i, name: c.name, headline: c.headline, tier: c.tier, match_reasons: c.match_reasons, channel: c.channel })) }, null, 1) }}",
+              "role": "user"
+            }
+          ]
+        },
+        "modelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $json.settings.model_drafts }}"
+        },
+        "operation": "message",
+        "options": {
+          "maxTokens": 8000,
+          "system": "You write short, personal networking messages for an early-career engineer who wants to learn about a vacancy and ask for a referral.\nYou get the candidate, the job and a list of contacts (each with an id, name, headline, tier and match_reasons).\nFor EVERY contact write one email and one LinkedIn note.\nRules:\n- English. Email body under 120 words. LinkedIn note under 300 characters.\n- Address the contact by first name.\n- Open with the real shared link from match_reasons (same university, same past employer, same field). Use ONLY facts given in the input. Never invent shared history, projects, names or numbers. If match_reasons is only about the field/team, say you saw they work on that.\n- Degrees and years in match_reasons describe the CONTACT, not the candidate. Describe the candidate's own degree and years only from the candidate data (e.g. contact did an MS at TU/e, candidate did a BSc there: say \"we both studied at TU/e\", not \"we both did our MS\").\n- Describe the candidate only with facts from the candidate data. Do NOT say the candidate has already applied, has met the contact, or was referred by anyone; say the candidate is interested in / considering applying for the role.\n- If the contact's headline shows a different department (e.g. IT, finance, operations, product, sales), do not pretend they are on the team; ask whether they could point the candidate to the right person.\n- For tier \"recruiter\": no shared-link opener; ask 1 practical question about the process instead.\n- Ask 1-2 specific questions about the role or team, based on the job description.\n- Ask politely whether they would be open to referring the candidate, and give an easy way out (e.g. \"no worries if not\").\n- Include the job link exactly as given. End the email with the candidate's signature. The LinkedIn note may skip links.\n- No flattery, no pressure, never say how the contact was found, no placeholders like [Name].\n- Every message must be worded differently; no copy-paste feel.\nReturn ONLY a JSON object (no markdown fences, no text around it):\n{\"drafts\": [{\"id\": number, \"subject\": string, \"body\": string, \"linkedin_note\": string}]}"
+        },
+        "resource": "text"
+      },
+      "notes": "Sonnet (Settings.model_drafts): one call per job, email + LinkedIn note per contact. Drafts only, nothing is sent.",
+      "credentials": {
+        "anthropicApi": {
+          "name": "Anthropic account"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 2
+    },
+    {
+      "id": "02ca7356-7704-4b13-be80-9592b63793f0",
+      "name": "Any drafts?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1792,
+        -220
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "Any drafts?",
+              "leftValue": "={{ !$json.__no_rows }}",
+              "operator": {
+                "operation": "true",
+                "singleValue": true,
+                "type": "boolean"
+              },
+              "rightValue": ""
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          }
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      }
+    },
+    {
+      "id": "68841917-e21b-4cfc-b4e4-cb32fe74f32a",
+      "name": "Save drafts",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        2016,
+        -320
+      ],
+      "parameters": {
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [],
+          "schema": [
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "auth_user_id",
+              "id": "auth_user_id",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "job_id",
+              "id": "job_id",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "job_title",
+              "id": "job_title",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "company",
+              "id": "company",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "job_url",
+              "id": "job_url",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "contact_name",
+              "id": "contact_name",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "contact_linkedin_url",
+              "id": "contact_linkedin_url",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "contact_headline",
+              "id": "contact_headline",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "tier",
+              "id": "tier",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "score",
+              "id": "score",
+              "required": false,
+              "type": "number"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "match_reasons",
+              "id": "match_reasons",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "email",
+              "id": "email",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "email_status",
+              "id": "email_status",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "channel",
+              "id": "channel",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "subject",
+              "id": "subject",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "body",
+              "id": "body",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "linkedin_note",
+              "id": "linkedin_note",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "status",
+              "id": "status",
+              "required": false,
+              "type": "string"
+            }
+          ],
+          "value": {
+            "auth_user_id": "={{ $json.auth_user_id }}",
+            "body": "={{ $json.body }}",
+            "channel": "={{ $json.channel }}",
+            "company": "={{ $json.company }}",
+            "contact_headline": "={{ $json.contact_headline }}",
+            "contact_linkedin_url": "={{ $json.contact_linkedin_url }}",
+            "contact_name": "={{ $json.contact_name }}",
+            "email": "={{ $json.email }}",
+            "email_status": "={{ $json.email_status }}",
+            "job_id": "={{ $json.job_id }}",
+            "job_title": "={{ $json.job_title }}",
+            "job_url": "={{ $json.job_url }}",
+            "linkedin_note": "={{ $json.linkedin_note }}",
+            "match_reasons": "={{ $json.match_reasons }}",
+            "score": "={{ $json.score }}",
+            "status": "={{ $json.status }}",
+            "subject": "={{ $json.subject }}",
+            "tier": "={{ $json.tier }}"
+          }
+        },
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "referral_drafts",
+          "cachedResultName": "referral_drafts"
+        },
+        "operation": "insert",
+        "options": {},
+        "resource": "row"
+      },
+      "notes": "Human in the loop: review drafts in the referral_drafts table (status draft / needs_review). Nothing is sent.",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "21104761-5276-4a58-8a44-6d2706db282b",
+      "name": "Settings",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// ---- Switches (pipeline callers can override via `settings`) ----\nconst DEFAULTS = {\n  tier_alumni: true,             // Tier 1: same school\n  tier1_keyword_filter: true,    // Tier 1 first searches alumni with the peer titles; plain alumni search becomes a fallback\n  tier_ex_colleagues: true,      // Tier 2: same past employer\n  tier_same_team: true,          // Tier 3: peer titles in the job's city\n  enrich_profiles: true,         // full profiles for the shortlist (pass-2 scoring)\n  find_emails: true,             // email search + fallback email finder\n  draft_messages: true,          // Claude drafts\n  save_as_gmail_drafts: false,   // no Gmail credential yet\n  min_contacts_before_next_tier: 3,\n  shortlist_size: 5,             // pass-1 shortlist that gets enriched\n  contacts_per_job: 3,           // drafts per job (pass 2), recruiter extra\n  search_pages_per_query: 1,     // 1 page = up to 25 profiles ($0.10)\n  model_light: 'claude-haiku-4-5-20251001',   // Step 3 job keywords\n  model_drafts: 'claude-sonnet-5'    // Step 8 message drafts\n};\n\nreturn $input.all().map(i => ({\n  json: { ...i.json, settings: { ...DEFAULTS, ...(i.json.settings || {}) } }\n}));\n",
+        "language": "javaScript",
+        "mode": "runOnceForAllItems"
+      },
+      "notes": "Switch tiers / enrichment / emails / drafts on-off and pick models here."
+    },
+    {
+      "id": "49929389-53e9-4cc2-9446-a68f0efada74",
+      "name": "Normalize & group",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        896,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// Normalize company URLs, schools, past employers, city; group jobs by company.\nconst items = $('Settings').all().map(i => i.json);\n\nconst SCHOOL_ALIASES = {\n  'tu/e': 'Eindhoven University of Technology',\n  'tue': 'Eindhoven University of Technology',\n  'technische universiteit eindhoven': 'Eindhoven University of Technology',\n  'tu delft': 'Delft University of Technology',\n  'uva': 'University of Amsterdam'\n};\nconst normCompany = u => {\n  const m = String(u || '').match(/linkedin\\.com\\/company\\/([^/?#]+)/i);\n  return m ? `https://www.linkedin.com/company/${decodeURIComponent(m[1]).toLowerCase()}` : '';\n};\nconst normProfile = u => {\n  const m = String(u || '').match(/linkedin\\.com\\/in\\/([^/?#]+)/i);\n  return m ? `https://www.linkedin.com/in/${decodeURIComponent(m[1])}` : ''; // keep case: ACwAA... ids are case-sensitive\n};\n\nconst contacted = $input.all()\n  .map(i => normProfile(i.json && i.json.linkedin_url))\n  .filter(Boolean);\n\nconst groups = {};\nfor (const it of items) {\n  const job = it.job || {};\n  const cand = it.candidate || {};\n  const companyUrl = normCompany(job.companyUrl);\n  const key = companyUrl || ('name:' + String(job.companyName || '').toLowerCase());\n  if (!groups[key]) {\n    const edu = cand.education || [];\n    const schools = [...new Set(edu.map(e => {\n      const s = typeof e === 'string' ? e : (e && e.school);\n      return SCHOOL_ALIASES[String(s || '').toLowerCase().trim()] || s;\n    }).filter(Boolean))];\n    const school_terms = [...new Set(edu.flatMap(e => typeof e === 'string' ? [e] : [e.school, ...(e.school_aliases || [])])\n      .concat(schools).filter(Boolean).map(s => String(s).toLowerCase()))];\n    const past_companies = (cand.experience || [])\n      .map(e => (typeof e === 'string' ? { company: e } : e))\n      .map(e => ({ name: e.company || '', url: normCompany(e.company_linkedin_url) }))\n      .filter(e => (e.url || e.name) && e.url !== companyUrl);\n    groups[key] = {\n      company: { name: job.companyName || '', url: companyUrl },\n      city: String(job.location || '').split(',')[0].trim(),\n      jobs: [],\n      candidate: cand,\n      settings: it.settings,\n      schools,\n      school_terms,\n      past_companies,\n      past_company_urls: [...new Set(past_companies.map(p => p.url).filter(Boolean))],\n      contacted\n    };\n  }\n  groups[key].jobs.push(job);\n}\nreturn Object.values(groups).map(g => ({ json: g }));\n",
+        "language": "javaScript",
+        "mode": "runOnceForAllItems"
+      },
+      "notes": "Canonical company URLs, school names, past employers, city; one item per company."
+    },
+    {
+      "id": "c7ece378-9e9c-4ed4-966f-d5d71524dbab",
+      "name": "Parse keywords",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1568,
+        100
+      ],
+      "parameters": {
+        "jsCode": "const ctx = $('Loop companies').first().json;\nconst res = $input.first().json || {};\nlet text = '';\nif (Array.isArray(res.content)) text = res.content.filter(c => c.type === 'text').map(c => c.text).join('\\n');\nelse text = res.text || res.merged_response || '';\n\nlet kw = {};\ntry { const m = text.match(/\\{[\\s\\S]*\\}/); kw = JSON.parse(m ? m[0] : text); } catch (e) { kw = {}; }\n\nconst team_keywords = (kw.team_keywords || []).filter(Boolean).map(String).slice(0, 5);\nlet peer_titles = (kw.peer_titles || []).filter(Boolean).map(String).slice(0, 3);\nif (!peer_titles.length) peer_titles = [...new Set(ctx.jobs.map(j => j.title).filter(Boolean))].slice(0, 3);\n\nreturn [{ json: {\n  ...ctx,\n  team_keywords,\n  peer_titles,\n  keywords_error: team_keywords.length ? null : (res.error ? JSON.stringify(res.error).slice(0, 300) : text.slice(0, 300))\n} }];\n",
+        "language": "javaScript",
+        "mode": "runOnceForAllItems"
+      }
+    },
+    {
+      "id": "417a63ef-7547-4654-912b-778ae2ecbfa9",
+      "name": "Plan tier 1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1792,
+        100
+      ],
+      "parameters": {
+        "jsCode": "const ctx = $input.first().json;\nconst s = ctx.settings;\nconst EXCLUDE = ['Recruiter', 'Talent Acquisition', 'Recruitment', 'HR', 'Human Resources'];\nconst run = !!(s.tier_alumni && ctx.company.url && ctx.schools.length);\n// LinkedIn boolean query: alumni who hold one of the peer titles (keeps big companies relevant)\nconst query = s.tier1_keyword_filter && (ctx.peer_titles || []).length\n  ? ctx.peer_titles.slice(0, 3).map(t => `\"${t}\"`).join(' OR ') : '';\nreturn [{ json: {\n  ...ctx,\n  run_tier1: run,\n  tier1_body: run ? {\n    profileScraperMode: 'Short',\n    currentCompanies: [ctx.company.url],\n    schools: ctx.schools,\n    excludeCurrentJobTitles: EXCLUDE,\n    takePages: s.search_pages_per_query,\n    maxItems: 25 * s.search_pages_per_query,\n    ...(query ? { searchQuery: query } : {})\n  } : null\n} }];\n",
+        "language": "javaScript",
+        "mode": "runOnceForAllItems"
+      }
+    },
+    {
+      "id": "db5bebd8-d461-4ac0-8e2b-68f1c0af84ce",
+      "name": "Collect tier 1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2464,
+        100
+      ],
+      "parameters": {
+        "jsCode": "const ctx = $('Plan tier 1').first().json;\nconst rows = ctx.run_tier1 ? $input.all().map(i => i.json) : [];\nconst errors = rows.filter(r => r && r.error).map(r => r.error.message || JSON.stringify(r.error).slice(0, 200));\nconst people = rows\n  .filter(r => r && !r.error && (r.linkedinUrl || r.publicIdentifier))\n  .map(r => ({ ...r, _tiers: ['alumni'] }));\n\nconst { tier1_body, run_tier1, ...rest } = ctx;\nreturn [{ json: { ...rest, found: people, search_errors: errors, searches_run: run_tier1 ? 1 : 0,\n  tier1_query: (run_tier1 && tier1_body && tier1_body.searchQuery) || '' } }];\n",
+        "language": "javaScript",
+        "mode": "runOnceForAllItems"
+      }
+    },
+    {
+      "id": "09bfcdae-3d87-4957-9319-8a2fe244920b",
+      "name": "Plan fallback searches",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2912,
+        260
+      ],
+      "parameters": {
+        "jsCode": "// Tier 1b (alumni without title filter), Tier 2 (ex-colleagues) and Tier 3 (same team), only when switched on and possible.\nconst ctx = $input.first().json;\nconst s = ctx.settings;\nconst EXCLUDE = ['Recruiter', 'Talent Acquisition', 'Recruitment', 'HR', 'Human Resources'];\nconst base = {\n  profileScraperMode: 'Short',\n  currentCompanies: [ctx.company.url],\n  excludeCurrentJobTitles: EXCLUDE,\n  takePages: s.search_pages_per_query,\n  maxItems: 25 * s.search_pages_per_query\n};\nconst reqs = [];\n// Tier 1b: alumni without the title filter (only if Tier 1 used one)\nif (ctx.company.url && s.tier_alumni && ctx.tier1_query && ctx.schools.length) {\n  reqs.push({ tier: 'alumni', body: { ...base, schools: ctx.schools } });\n}\nif (ctx.company.url && s.tier_ex_colleagues && ctx.past_company_urls.length) {\n  reqs.push({ tier: 'ex_colleague', body: { ...base, pastCompanies: ctx.past_company_urls } });\n}\nif (ctx.company.url && s.tier_same_team && ctx.peer_titles.length) {\n  // no location filter: job cities are often small towns (e.g. Duizel); same city only adds +1 in scoring\n  reqs.push({ tier: 'same_team', body: { ...base, currentJobTitles: ctx.peer_titles } });\n}\nif (!reqs.length) return [{ json: { ...ctx, run_fallback: false } }];\nreturn reqs.map(r => ({ json: { run_fallback: true, tier: r.tier, body: r.body } }));\n",
+        "language": "javaScript",
+        "mode": "runOnceForAllItems"
+      }
+    },
+    {
+      "id": "ce2b44a7-4290-49b8-8171-480bc014deb8",
+      "name": "Collect fallback",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3584,
+        200
+      ],
+      "parameters": {
+        "jsCode": "const ctx = $('Collect tier 1').first().json;\nconst reqs = $('Plan fallback searches').all().map(i => i.json);\nconst people = [...ctx.found];\nconst errors = [...(ctx.search_errors || [])];\n\n$input.all().forEach((item, idx) => {\n  const r = item.json;\n  if (!r || !Object.keys(r).length) return;\n  let tier = reqs.length === 1 ? reqs[0].tier : 'same_team';\n  try { tier = $('Plan fallback searches').itemMatching(idx).json.tier || tier; } catch (e) {}\n  if (r.error) { errors.push(`${tier}: ${r.error.message || JSON.stringify(r.error).slice(0, 200)}`); return; }\n  if (r.linkedinUrl || r.publicIdentifier) people.push({ ...r, _tiers: [tier] });\n});\n\nreturn [{ json: { ...ctx, found: people, search_errors: errors, searches_run: (ctx.searches_run || 0) + reqs.length } }];\n",
+        "language": "javaScript",
+        "mode": "runOnceForAllItems"
+      }
+    },
+    {
+      "id": "fab86e1e-017f-4346-8145-95680e3467ba",
+      "name": "Score & shortlist",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3808,
+        100
+      ],
+      "parameters": {
+        "jsCode": "// Pass 1: dedupe across tiers, score on search data, keep the shortlist.\nconst ctx = $input.first().json;\nconst s = ctx.settings;\n\nconst normProfile = u => {\n  const m = String(u || '').match(/linkedin\\.com\\/in\\/([^/?#]+)/i);\n  return m ? `https://www.linkedin.com/in/${decodeURIComponent(m[1])}` : ''; // keep case: ACwAA... ids are case-sensitive\n};\nconst locText = p => typeof p.location === 'string' ? p.location\n  : (p.location && (p.location.linkedinText || p.location.text || (p.location.parsed && p.location.parsed.text))) || '';\n\nconst kw = [...(ctx.team_keywords || []), ...(ctx.peer_titles || [])].map(k => String(k).toLowerCase()).filter(Boolean);\nconst SENIOR = /\\b(vp|vice president|director|head of|chief|cto|ceo|coo|cfo|founder|co-founder|owner|partner|president)\\b/i;\nconst RECRUITER = /(recruit|talent acquisition|\\bhr\\b|human resources|sourcer)/i;\nconst contacted = new Set(ctx.contacted || []);\n\nconst byUrl = {};\nfor (const p of ctx.found || []) {\n  const url = normProfile(p.linkedinUrl || (p.publicIdentifier ? `https://www.linkedin.com/in/${p.publicIdentifier}` : ''));\n  if (!url) continue;\n  if (!byUrl[url]) byUrl[url] = { p, url, tiers: new Set() };\n  (p._tiers || []).forEach(t => byUrl[url].tiers.add(t));\n}\n\nlet skippedContacted = 0;\nconst people = [];\nfor (const { p, url, tiers } of Object.values(byUrl)) {\n  if (contacted.has(url)) { skippedContacted++; continue; }\n  const cur = (p.currentPositions || [])[0] || {};\n  const headline = p.headline || p.position || (cur.title ? `${cur.title}${cur.companyName ? ' at ' + cur.companyName : ''}` : '');\n  if (RECRUITER.test(headline)) continue;\n  // strip academic / honorific prefixes (ir., ing., dr., mr., prof., drs.) from names\n  const TITLE = /^(ir|ing|dr|drs|mr|prof|msc|bsc)\\.?\\s+/i;\n  const firstName = String(p.firstName || '').replace(TITLE, '').trim();\n  const name = ([firstName, p.lastName].filter(Boolean).join(' ') || p.fullName || p.name || '').replace(TITLE, '').trim();\n  const location = locText(p);\n  let score = 0;\n  const reasons = [];\n  if (tiers.has('alumni')) { score += 4; reasons.push(`Alumnus/alumna of ${ctx.schools.join(' or ')} (search filter)`); }\n  if (tiers.has('ex_colleague')) { score += 3; reasons.push('Worked at one of the candidate\\'s past employers (search filter)'); }\n  const hl = headline.toLowerCase();\n  const hit = kw.find(k => hl.includes(k)) ||\n    kw.map(k => k.split(/\\s+/)).filter(w => w.length >= 2).map(w => w.slice(-2).join(' ')).find(k => hl.includes(k));\n  if (hit) { score += 2; reasons.push(`Works on \"${hit}\" (headline)`); }\n  if (ctx.city && location.toLowerCase().includes(ctx.city.toLowerCase())) score += 1;\n  if (SENIOR.test(headline)) score -= 2;\n  const tier = tiers.has('alumni') ? 'alumni' : tiers.has('ex_colleague') ? 'ex_colleague' : 'same_team';\n  people.push({\n    name, first_name: firstName || name.split(' ')[0] || '', last_name: p.lastName || '',\n    headline, linkedin_url: url, profile_id: p.id || '', location, tier, tiers: [...tiers], score, match_reasons: reasons\n  });\n}\npeople.sort((a, b) => b.score - a.score);\nconst shortlist = people.slice(0, s.shortlist_size);\n\n// Recruiters from the job postings (free, often empty)\nconst recruiters = [];\nfor (const j of ctx.jobs) {\n  if (!j.recruiterName && !j.recruiterUrl) continue;\n  recruiters.push({\n    job_id: j.id, name: j.recruiterName || '', first_name: String(j.recruiterName || '').split(' ')[0],\n    headline: 'Recruiter on the job posting', linkedin_url: normProfile(j.recruiterUrl), location: '',\n    tier: 'recruiter', tiers: ['recruiter'], score: 0, match_reasons: ['Recruiter listed on the job posting']\n  });\n}\n\nconst { found, ...rest } = ctx;\nreturn [{ json: {\n  ...rest,\n  shortlist,\n  recruiters,\n  stats: {\n    searched: Object.keys(byUrl).length,\n    alumni_found: people.filter(p => p.tiers.includes('alumni')).length,\n    ex_colleagues_found: people.filter(p => p.tiers.includes('ex_colleague')).length,\n    same_team_found: people.filter(p => p.tiers.includes('same_team')).length,\n    skipped_already_contacted: skippedContacted\n  }\n} }];\n",
+        "language": "javaScript",
+        "mode": "runOnceForAllItems"
+      },
+      "notes": "Pass 1: dedupe, score, top shortlist_size + recruiter from posting."
+    },
+    {
+      "id": "dcd82953-f5ee-4381-b88e-3fcbea1631c0",
+      "name": "Collect enrichment",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4480,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// Attach full profiles (+ work emails at the company's own domain) to the shortlist.\nconst ctx = $('Score & shortlist').first().json;\nconst s = ctx.settings;\n\n// Company email domain from the LinkedIn company page website\nfunction registrable(host) {\n  const parts = String(host || '').toLowerCase().replace(/^www\\./, '').split('.').filter(Boolean);\n  if (parts.length <= 2) return parts.join('.');\n  const twoLevel = ['co.uk', 'com.au', 'co.jp', 'com.br', 'co.nz', 'co.za'];\n  const last2 = parts.slice(-2).join('.');\n  return twoLevel.includes(last2) ? parts.slice(-3).join('.') : last2;\n}\nlet company_domain = '';\ntry {\n  const co = $('Apify: company info').first().json || {};\n  const site = String(co.website || co.websiteUrl || '');\n  const host = (site.match(/^(?:https?:\\/\\/)?([^/?#:]+)/i) || [])[1] || '';\n  company_domain = host ? registrable(host) : '';\n} catch (e) { company_domain = ''; }\nconst normProfile = u => {\n  const m = String(u || '').match(/linkedin\\.com\\/in\\/([^/?#]+)/i);\n  return m ? `https://www.linkedin.com/in/${decodeURIComponent(m[1])}` : ''; // keep case: ACwAA... ids are case-sensitive\n};\n\nconst rows = $input.all().map(i => i.json).filter(r => r && Object.keys(r).length);\nconst errors = rows.filter(r => r.error).map(r => r.error.message || JSON.stringify(r.error).slice(0, 200));\nconst byUrl = {};\nfor (const r of rows) {\n  if (r.error) continue;\n  const keys = [r.linkedinUrl, r.url, r.publicIdentifier && `https://www.linkedin.com/in/${r.publicIdentifier}`,\n    r.originalQuery && (r.originalQuery.url || r.originalQuery.query), r.id && `https://www.linkedin.com/in/${r.id}`]\n    .map(normProfile).filter(Boolean);\n  for (const k of keys) byUrl[k] = r;\n  if (r.id) byUrl['id:' + r.id] = r;\n}\n\n// Emails can come as a string, an array of strings, or objects {email, status, ...}\nfunction pickEmail(r) {\n  const list = [];\n  if (r.email) list.push(r.email);\n  for (const e of (r.emails || [])) list.push(e);\n  for (const e of list) {\n    const addr = typeof e === 'string' ? e : (e && (e.email || e.address || e.value));\n    if (!addr || !String(addr).includes('@')) continue;\n    if (/@(gmail|googlemail|outlook|hotmail|yahoo|icloud|live|proton|protonmail|me)\\./i.test(addr)) continue; // work emails only\n    const dom = String(addr).split('@')[1].toLowerCase();\n    if (company_domain && !(dom === company_domain || dom.endsWith('.' + company_domain))) continue; // email from another employer\n    const status = String((e && (e.status || e.verificationStatus || e.quality)) || '').toLowerCase();\n    if (/invalid|undeliverable/.test(status)) continue;\n    return { email: addr, status: (!company_domain || /risky|catch|unknown|accept_all/.test(status)) ? 'guessed' : 'found' };\n  }\n  return null;\n}\n\nconst shortlist = ctx.shortlist.map(c => {\n  const full = byUrl[c.linkedin_url] || (c.profile_id && byUrl['id:' + c.profile_id]);\n  if (!full) return { ...c, email: '', email_status: 'not_found' };\n  const e = s.find_emails ? pickEmail(full) : null;\n  return {\n    ...c,\n    headline: full.headline || c.headline,\n    full: {\n      education: full.education || full.educations || [],\n      experience: full.experience || full.experiences || full.positions || []\n    },\n    email: e ? e.email : '',\n    email_status: e ? e.status : 'not_found'\n  };\n});\n\nconst need_email = s.find_emails ? shortlist.filter(c => !c.email && c.name) : [];\nreturn [{ json: { ...ctx, company_domain, shortlist, need_email, enrich_errors: errors } }];\n",
+        "language": "javaScript",
+        "mode": "runOnceForAllItems"
+      }
+    },
+    {
+      "id": "e321acc3-957c-43eb-815b-067153f10d7f",
+      "name": "Build finder input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5152,
+        -100
+      ],
+      "parameters": {
+        "jsCode": "// Email domain: the company website domain (from Collect enrichment); else a verified colleague email's domain.\nconst ctx = $input.first().json;\nconst FREE = /^(gmail|googlemail|outlook|hotmail|yahoo|icloud|live|proton|protonmail|me)\\./i;\nlet domain = ctx.company_domain || '';\nif (!domain) {\n  const known = ctx.shortlist.filter(c => c.email_status === 'found').map(c => c.email).find(e => e && e.includes('@') && !FREE.test(e.split('@')[1]));\n  if (known) domain = known.split('@')[1].toLowerCase();\n}\n\nif (!domain) return [{ json: { ...ctx, company_domain: '', run_finder: false } }];\nreturn [{ json: {\n  ...ctx,\n  company_domain: domain,\n  run_finder: true,\n  finder_body: {\n    people: ctx.need_email.map(c => `${c.name}, ${domain}`),\n    discoverPattern: true,\n    concurrency: 1,\n    proxyConfiguration: { useApifyProxy: true }\n  }\n} }];\n",
+        "language": "javaScript",
+        "mode": "runOnceForAllItems"
+      }
+    },
+    {
+      "id": "eca4e077-6bb2-4e57-a0ee-7cc0b214a0c0",
+      "name": "Collect emails",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5824,
+        -200
+      ],
+      "parameters": {
+        "jsCode": "// Fill missing emails. Best source: the pattern of a verified colleague email at the same domain\n// (e.g. jane.doe@ -> first.last). Fallback: the email finder. Both count as \"guessed\" (never auto-send),\n// except finder results published on the company site (\"found_on_site\").\nconst ctx = $('Build finder input').first().json;\nconst domain = ctx.company_domain;\nconst rows = $input.all().map(i => i.json).filter(r => r && !r.error && r.mostLikelyEmail);\n\nconst clean = x => String(x || '').toLowerCase().replace(/ı/g, 'i').replace(/ø/g, 'o').replace(/ß/g, 'ss').replace(/æ/g, 'ae')\n  .normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z\\s-]/g, ' ').replace(/\\s+/g, ' ').trim();\nfunction nameParts(c) {\n  const nameToks = String(c.name || '').split(/\\s+/);\n  const first = clean(c.first_name || nameToks[0]).split(' ')[0] || '';\n  const lastToks = clean(c.last_name || nameToks.slice(1).join(' ')).split(/[\\s-]+/).filter(Boolean);\n  return { first, lastFull: lastToks.join(''), lastTok: lastToks[lastToks.length - 1] || '' };\n}\nconst PATS = {\n  'first.last': (f, l) => `${f}.${l}`, 'first-last': (f, l) => `${f}-${l}`, 'first_last': (f, l) => `${f}_${l}`,\n  'firstlast': (f, l) => f + l, 'flast': (f, l) => f[0] + l, 'f.last': (f, l) => `${f[0]}.${l}`\n};\n\n// learn the pattern from verified colleague emails\nlet learned = null;\nfor (const c of ctx.shortlist) {\n  if (!c.email || c.email_status !== 'found') continue;\n  const [local, dom] = c.email.toLowerCase().split('@');\n  if (dom !== domain) continue;\n  const p = nameParts(c);\n  for (const [pat, fn] of Object.entries(PATS)) {\n    for (const lk of ['lastFull', 'lastTok']) {\n      if (!learned && p.first && p[lk] && fn(p.first, p[lk]) === local) learned = { pat, lk };\n    }\n  }\n}\n\nconst normName = x => clean(x).replace(/[^a-z]/g, '');\nconst rowName = r => r.fullName || r.name || [r.firstName, r.lastName].filter(Boolean).join(' ');\nconst used = new Set();\n\nconst shortlist = ctx.shortlist.map(c => {\n  if (c.email) return c;\n  const idx = rows.findIndex((r, i) => !used.has(i) && normName(rowName(r)) === normName(c.name));\n  const r = idx >= 0 ? rows[idx] : null;\n  if (idx >= 0) used.add(idx);\n  if (r && r.method === 'found_on_site') {\n    return { ...c, email: r.mostLikelyEmail, email_status: 'found', email_method: 'found_on_site' };\n  }\n  if (learned) {\n    const p = nameParts(c);\n    if (p.first && p[learned.lk]) {\n      return { ...c, email: `${PATS[learned.pat](p.first, p[learned.lk])}@${domain}`, email_status: 'guessed', email_method: `colleague_pattern:${learned.pat}` };\n    }\n  }\n  if (r) return { ...c, email: r.mostLikelyEmail, email_status: 'guessed', email_method: r.method || 'finder', email_confidence: Number(r.confidence || 0) };\n  return c;\n});\n\nconst { finder_body, ...rest } = ctx;\nreturn [{ json: { ...rest, shortlist, email_pattern: learned ? learned.pat : null } }];\n",
+        "language": "javaScript",
+        "mode": "runOnceForAllItems"
+      }
+    },
+    {
+      "id": "db255b9b-4bb0-4029-878a-dcd0ae4ee08a",
+      "name": "Rescore & expand",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6048,
+        100
+      ],
+      "parameters": {
+        "jsCode": "// Pass 2: confirm school / ex-employer from full profiles, add year bonus, build match_reasons from real data,\n// keep the top N, then emit one item per job.\nconst ctx = $input.first().json;\nconst s = ctx.settings;\nconst cand = ctx.candidate || {};\n\nconst years = o => (JSON.stringify(o || {}).match(/\\b(19[7-9]\\d|20[0-3]\\d)\\b/g) || []).map(Number);\nconst candEnd = Math.max(0, ...(cand.education || []).map(e => Number(e && e.end_year) || 0)) || null;\nconst schoolTerms = (ctx.school_terms || []).filter(t => t.length > 2);\nconst pastKeys = (ctx.past_companies || []).map(p => ({\n  name: p.name,\n  keys: [String(p.name || '').toLowerCase(), ((p.url || '').match(/\\/company\\/([^/]+)/) || [])[1]].filter(k => k && k.length > 2)\n}));\n\nconst scored = (ctx.shortlist || []).map(c => {\n  let score = c.score;\n  const reasons = c.match_reasons.filter(r => !/search filter/.test(r));\n  if (c.full) {\n    const edu = Array.isArray(c.full.education) ? c.full.education : [];\n    const eduMatch = edu.find(e => { const t = JSON.stringify(e).toLowerCase(); return schoolTerms.some(k => t.includes(k)); });\n    if (eduMatch) {\n      const ys = years(eduMatch);\n      const end = ys.length ? Math.max(...ys) : null;\n      const deg = eduMatch.degree || eduMatch.degreeName || eduMatch.fieldOfStudy || eduMatch.subtitle || '';\n      const schoolName = eduMatch.schoolName || eduMatch.school || ctx.schools.find(sch => JSON.stringify(eduMatch).toLowerCase().includes(String(sch).toLowerCase())) || ctx.schools[0];\n      reasons.unshift(`${schoolName} alumnus/alumna${deg || end ? ` (${[deg, end].filter(Boolean).join(', ')})` : ''}`);\n      if (!c.tiers.includes('alumni')) score += 4;\n      if (end && candEnd && Math.abs(end - candEnd) <= 5) score += 1;\n    } else if (c.tiers.includes('alumni')) {\n      if (edu.length) score -= 4; // school not confirmed on the full profile\n      else reasons.unshift(`Alumnus/alumna of ${ctx.schools.join(' or ')}`); // no education data returned: trust the search filter\n    }\n    const expText = JSON.stringify(c.full.experience || []).toLowerCase();\n    const past = pastKeys.find(p => p.keys.some(k => expText.includes(k)));\n    if (past) {\n      reasons.push(`Also worked at ${past.name}`);\n      if (!c.tiers.includes('ex_colleague')) score += 3;\n    } else if (c.tiers.includes('ex_colleague')) {\n      if ((c.full.experience || []).length) score -= 3;\n      else reasons.push('Worked at one of the candidate\\'s past employers');\n    }\n  } else {\n    // not enriched: keep the search-filter facts, stated plainly\n    if (c.tiers.includes('alumni')) reasons.unshift(`Alumnus/alumna of ${ctx.schools.join(' or ')}`);\n    if (c.tiers.includes('ex_colleague')) reasons.push('Worked at one of the candidate\\'s past employers');\n  }\n  const email_status = c.email_status || 'not_found';\n  return {\n    name: c.name, first_name: c.first_name, headline: c.headline, linkedin_url: c.linkedin_url, location: c.location,\n    tier: c.tier, score, match_reasons: reasons,\n    email: c.email || '', email_status,\n    channel: c.email && email_status === 'found' ? 'email' : 'linkedin'\n  };\n}).filter(c => c.match_reasons.length > 0 || c.score > 0);\n\nscored.sort((a, b) => b.score - a.score);\nconst top = scored.slice(0, s.contacts_per_job);\n\nreturn ctx.jobs.map(job => {\n  const recruiters = (ctx.recruiters || []).filter(r => r.job_id === job.id).map(r => ({\n    name: r.name, first_name: r.first_name, headline: r.headline, linkedin_url: r.linkedin_url, location: '',\n    tier: 'recruiter', score: 0, match_reasons: r.match_reasons, email: '', email_status: 'not_found', channel: 'linkedin'\n  }));\n  const contacts = [...top, ...recruiters];\n  return { json: {\n    job, candidate: cand, company: ctx.company, settings: s, contacts,\n    summary: {\n      ...(ctx.stats || {}),\n      searches_run: ctx.searches_run || 0,\n      emails_found: contacts.filter(c => c.email_status === 'found').length,\n      team_keywords: ctx.team_keywords, peer_titles: ctx.peer_titles,\n      errors: [...(ctx.search_errors || []), ...(ctx.enrich_errors || []), ...(ctx.keywords_error ? ['keywords: ' + ctx.keywords_error] : [])]\n    }\n  } };\n});\n",
+        "language": "javaScript",
+        "mode": "runOnceForAllItems"
+      },
+      "notes": "Pass 2: confirm school / ex-employer on full profiles, year bonus, top contacts_per_job; one item per job."
+    },
+    {
+      "id": "e95aebfd-48c4-43de-a9d6-e32802e76872",
+      "name": "Format job result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6720,
+        100
+      ],
+      "parameters": {
+        "jsCode": "// Parse + validate drafts, build the per-job output (contract §2). Runs once per job item.\nconst ctx = $('Rescore & expand').item.json;\nconst job = ctx.job, cand = ctx.candidate || {};\nconst res = $json || {};\n\nlet drafts = [];\nlet draft_error = null;\nif (ctx.settings.draft_messages && ctx.contacts.length) {\n  const text = Array.isArray(res.content) ? res.content.filter(c => c.type === 'text').map(c => c.text).join('\\n') : (res.text || '');\n  try { const m = text.match(/\\{[\\s\\S]*\\}/); drafts = (JSON.parse(m ? m[0] : text).drafts) || []; }\n  catch (e) { draft_error = res.error ? JSON.stringify(res.error).slice(0, 300) : ('Drafts are not valid JSON: ' + text.slice(0, 200)); }\n}\n\nconst slug = u => String(u || '').toLowerCase().replace(/^https?:\\/\\//, '').replace(/^[a-z]{2}\\./, '').replace(/^www\\./, '').replace(/\\/+$/, '').split('?')[0];\nconst allowed = [job.url, cand.linkedin_url].filter(Boolean).map(slug);\n\nconst contacts = ctx.contacts.map((c, i) => {\n  const d = drafts.find(x => Number(x.id) === i);\n  if (!d) return { ...c, draft: null, draft_status: ctx.settings.draft_messages ? 'missing' : 'off' };\n  const body = String(d.body || ''), note = String(d.linkedin_note || '');\n  const issues = [];\n  const wc = body.split(/\\s+/).filter(Boolean).length;\n  if (wc > 130) issues.push(`email ${wc} words`);\n  if (note.length > 300) issues.push(`note ${note.length} chars`);\n  const fn = String(c.first_name || c.name || '').split(/\\s+/)[0];\n  if (fn && !body.includes(fn) && !note.includes(fn)) issues.push('contact name missing');\n  const links = (body + ' ' + note).match(/(https?:\\/\\/[^\\s)>\\]]+|(?:[a-z]{2}\\.|www\\.)?linkedin\\.com\\/[^\\s)>\\]]+)/gi) || [];\n  const bad = links.filter(l => { const sl = slug(l).replace(/[.,;]+$/, ''); return !allowed.some(a => sl.startsWith(a) || a.startsWith(sl)); });\n  if (bad.length) issues.push('unexpected links: ' + bad.join(' '));\n  return {\n    ...c,\n    draft: { subject: String(d.subject || ''), body, linkedin_note: note },\n    draft_status: issues.length ? 'needs_review' : 'draft',\n    draft_issues: issues\n  };\n});\n\nreturn { json: {\n  auth_user_id: cand.auth_user_id || '',\n  job_id: job.id,\n  job_title: job.title,\n  company: job.companyName,\n  job_url: job.url,\n  contacts,\n  summary: { ...ctx.summary, ...(draft_error ? { draft_error } : {}) },\n  // search failed (e.g. Apify concurrency limit) -> 'search_error' is not stored, so the job is retried on the next run\n  status: !ctx.contacts.length ? (!((ctx.summary || {}).searched) && ((ctx.summary || {}).errors || []).length ? 'search_error' : 'no_contacts') : (draft_error ? 'draft_error' : (ctx.settings.draft_messages ? 'drafted' : 'contacts_only'))\n} };\n",
+        "language": "javaScript",
+        "mode": "runOnceForEachItem"
+      },
+      "notes": "Validates drafts (length, name, links) and builds the output item per job."
+    },
+    {
+      "id": "c8ee3b65-6a3a-4f62-ae05-ce35db6ab5e5",
+      "name": "Collect results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1344,
+        -220
+      ],
+      "parameters": {
+        "jsCode": "// All job results from the loop\nreturn $input.all();",
+        "language": "javaScript",
+        "mode": "runOnceForAllItems"
+      }
+    },
+    {
+      "id": "8ba7f418-e413-4765-9195-8043543ed4bd",
+      "name": "Build draft rows",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1568,
+        -220
+      ],
+      "parameters": {
+        "jsCode": "const rows = [];\nconst authUserId = $('Input').first().json.auth_user_id; // always set on every row\nfor (const it of $('Collect results').all()) {\n  const r = it.json;\n  for (const c of (r.contacts || [])) {\n    if (!c.draft) continue;\n    rows.push({ json: {\n      auth_user_id: r.auth_user_id || authUserId,\n      job_id: String(r.job_id || ''),\n      job_title: r.job_title || '',\n      company: r.company || '',\n      job_url: r.job_url || '',\n      contact_name: c.name || '',\n      contact_linkedin_url: c.linkedin_url || '',\n      contact_headline: c.headline || '',\n      tier: c.tier || '',\n      score: Number(c.score) || 0,\n      match_reasons: (c.match_reasons || []).join('; '),\n      email: c.email || '',\n      email_status: c.email_status || '',\n      channel: c.channel || '',\n      subject: c.draft.subject,\n      body: c.draft.body,\n      linkedin_note: c.draft.linkedin_note,\n      status: c.draft_status\n    } });\n  }\n  // no contacts at all: store a marker row so this user-vacancy pair is not searched again\n  if (!(r.contacts || []).length && r.status === 'no_contacts') {\n    rows.push({ json: { auth_user_id: r.auth_user_id || authUserId, job_id: String(r.job_id || ''), job_title: r.job_title || '',\n      company: r.company || '', job_url: r.job_url || '', contact_name: '', contact_linkedin_url: '', contact_headline: '',\n      tier: '', score: 0, match_reasons: '', email: '', email_status: '', channel: '', subject: '', body: '', linkedin_note: '',\n      status: 'no_contacts' } });\n  }\n}\nreturn rows.length ? rows : [{ json: { __no_rows: true } }];\n",
+        "language": "javaScript",
+        "mode": "runOnceForAllItems"
+      }
+    },
+    {
+      "id": "d3ddb309-6814-4abc-a35e-9a365b659162",
+      "name": "Return results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2240,
+        -220
+      ],
+      "parameters": {
+        "jsCode": "return $('Collect results').all();",
+        "language": "javaScript",
+        "mode": "runOnceForAllItems"
+      },
+      "notes": "One item per job (output contract). This is what the main pipeline receives."
+    },
+    {
+      "id": "3b071afd-fea3-4166-89da-c5ece1d541a4",
+      "name": "Test user",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2240,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// Manual tests only: the user to run for.\nreturn [{ json: { auth_user_id: '00000000-0000-0000-0000-000000000000' } }];",
+        "language": "javaScript",
+        "mode": "runOnceForAllItems"
+      },
+      "notes": "Manual test user. The pipeline passes auth_user_id instead."
+    },
+    {
+      "id": "317b376b-2dae-4561-bf79-b59409d4f7a0",
+      "name": "Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2016,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const j = $input.first().json || {};\nconst id = String(j.auth_user_id || '').trim();\nif (!id) throw new Error('auth_user_id is required');\n// worker_batch is only set when this workflow calls itself to process a group of companies in parallel\nconst batch = j.worker_batch && Array.isArray(j.worker_batch.companies) ? j.worker_batch : null;\nreturn [{ json: { auth_user_id: id, worker_batch: batch } }];\n",
+        "language": "javaScript",
+        "mode": "runOnceForAllItems"
+      },
+      "notes": "Only input of this workflow: auth_user_id."
+    },
+    {
+      "id": "831b1c09-9ffa-481c-9f6a-7c61c79004e0",
+      "name": "Load user",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        -1792,
+        0
+      ],
+      "parameters": {
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "users",
+          "cachedResultName": "users"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "condition": "eq",
+              "keyName": "auth_user_id",
+              "keyValue": "={{ $json.auth_user_id }}"
+            }
+          ]
+        },
+        "limit": 1,
+        "matchType": "allConditions",
+        "operation": "get",
+        "resource": "row"
+      },
+      "notes": "Profile + CV from the users table.",
+      "alwaysOutputData": true,
+      "executeOnce": true
+    },
+    {
+      "id": "1ce06346-32b7-4973-8061-c2b29bb156c7",
+      "name": "Load user jobs",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        -1568,
+        0
+      ],
+      "parameters": {
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "user_jobs",
+          "cachedResultName": "user_jobs"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "condition": "eq",
+              "keyName": "auth_user_id",
+              "keyValue": "={{ $('Input').first().json.auth_user_id }}"
+            }
+          ]
+        },
+        "matchType": "allConditions",
+        "operation": "get",
+        "resource": "row",
+        "returnAll": true
+      },
+      "notes": "Vacancies recommended to this user by the matching process.",
+      "alwaysOutputData": true,
+      "executeOnce": true
+    },
+    {
+      "id": "67d64a34-6356-42ce-9cd8-f5ff0a84678b",
+      "name": "Load jobs",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        -1344,
+        0
+      ],
+      "parameters": {
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "jobs",
+          "cachedResultName": "jobs"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "condition": "eq",
+              "keyName": "job_id",
+              "keyValue": "={{ $json.job_id }}"
+            }
+          ]
+        },
+        "limit": 1,
+        "matchType": "allConditions",
+        "operation": "get",
+        "resource": "row"
+      },
+      "notes": "Job details (company URL, description) for each recommended vacancy.",
+      "alwaysOutputData": true
+    },
+    {
+      "id": "883155cb-9c95-47c7-9f47-ba4d2ae281df",
+      "name": "Build candidate & jobs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1120,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// Real user: profile from `users`, recommended vacancies from `user_jobs` + `jobs`.\nconst MAX_JOBS = 0; // 0 = all recommended vacancies (sorted by priority_score). Each new company costs ~$0.15-0.45 of Apify credit.\n\nconst authUserId = $('Input').first().json.auth_user_id;\nconst user = $('Load user').first().json || {};\nif (!user.auth_user_id) throw new Error(`No user with auth_user_id ${authUserId} in the users table`);\n\nconst parse = s => { try { const v = JSON.parse(s || '[]'); return Array.isArray(v) ? v : []; } catch (e) { return []; } };\n\nconst allUserJobs = $('Load user jobs').all().map(i => i.json).filter(r => r && r.job_id && !r.hidden);\nconst byKey = {};\nfor (const i of $('Load jobs').all()) { const j = i.json; if (j && j.job_id) byKey[j.job_id] = j; }\n\n// user-vacancy pairs already in referral_drafts are kept as they are and not processed again\nconst done = new Set($input.all().map(i => i.json && i.json.job_id).filter(Boolean));\n\nconst userJobs = allUserJobs.filter(r => !done.has(r.job_id));\nconst jobs = userJobs\n  .sort((a, b) => (b.priority_score || 0) - (a.priority_score || 0) || (b.match_score || 0) - (a.match_score || 0))\n  .map(uj => {\n    const j = byKey[uj.job_id];\n    if (!j || j.is_active === false) return null;\n    let raw = {};\n    try { raw = JSON.parse(j.raw_data_json || '{}'); } catch (e) {}\n    return {\n      id: j.job_id,                               // jobs table key, e.g. linkedin:4470324179\n      external_id: j.external_job_id || raw.id || '',\n      title: j.title,\n      companyName: j.company_name,\n      companyUrl: j.company_url || raw.companyUrl || '',\n      location: j.location || '',\n      url: j.job_url || raw.url || '',\n      description: j.description || raw.description || '',\n      recruiterName: raw.recruiterName || '',\n      recruiterUrl: raw.recruiterUrl || '',\n      match_score: uj.match_score, priority_score: uj.priority_score\n    };\n  })\n  .filter(Boolean)\n  .slice(0, MAX_JOBS > 0 ? MAX_JOBS : undefined);\n\n// Raw profile text for the Haiku parser (tables store CV fields as loose JSON string lists)\nconst profile_text = [\n  `NAME (table): ${[user.first_name, user.last_name].filter(Boolean).join(' ')}`,\n  `LOCATION: ${user.location || ''}, ${user.country || ''}`,\n  `EDUCATION: ${parse(user.education_json).join(', ')}`,\n  `EXPERIENCE: ${parse(user.experience_json).join(', ')}`,\n  `PREVIOUS COMPANIES: ${parse(user.previous_companies_json).join('; ')}`,\n  `CV:\\n${String(user.cv_text || '').slice(0, 6000)}`\n].join('\\n');\n\nreturn [{ json: { auth_user_id: user.auth_user_id, user, jobs, profile_text,\n  recommended_jobs: allUserJobs.length, already_done: allUserJobs.length - userJobs.length } }];\n",
+        "language": "javaScript",
+        "mode": "runOnceForAllItems"
+      },
+      "notes": "Top MAX_JOBS vacancies by priority_score; raw profile text for the parser."
+    },
+    {
+      "id": "41c9ef84-7e7c-4b00-9305-0fb96ec83d04",
+      "name": "Parse candidate",
+      "type": "@n8n/n8n-nodes-langchain.anthropic",
+      "typeVersion": 1,
+      "position": [
+        -896,
+        0
+      ],
+      "parameters": {
+        "messages": {
+          "values": [
+            {
+              "content": "={{ $json.profile_text }}",
+              "role": "user"
+            }
+          ]
+        },
+        "modelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "claude-haiku-4-5-20251001"
+        },
+        "operation": "message",
+        "options": {
+          "maxTokens": 3000,
+          "system": "You turn a candidate's CV into structured data for a LinkedIn people search.\nReturn ONLY a JSON object (no markdown fences, no text around it):\n{\"full_name\": string, \"headline\": string, \"education\": [{\"school\": string, \"school_aliases\": string[], \"degree\": string, \"end_year\": number|null}], \"past_employers\": [{\"name\": string, \"title\": string}], \"projects\": string[]}\nRules:\n- Use ONLY facts from the text. Never invent.\n- full_name: the name written on the CV (prefer it over the table name).\n- headline: one short line, e.g. \"MSc AI student at University of Amsterdam, ML engineer\".\n- education.school: the official English name as LinkedIn shows it (e.g. \"Eindhoven University of Technology\", \"University of Amsterdam\"). school_aliases: common abbreviations / local names (e.g. \"TU/e\", \"UvA\", \"Universiteit van Amsterdam\"). end_year: graduation year (expected year if still studying).\n- past_employers: real companies or organisations the candidate was employed by (jobs, internships, research assistant roles), name as the company calls itself on LinkedIn. Exclude student teams, hackathons, clubs and schools where the candidate only studied. Most recent first, max 5.\n- projects: max 4 short project titles."
+        },
+        "resource": "text"
+      },
+      "notes": "Haiku: schools (official LinkedIn names), graduation years, past employers from the CV.",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "credentials": {
+        "anthropicApi": {
+          "name": "Anthropic account"
+        }
+      }
+    },
+    {
+      "id": "e301cd56-b9b1-441b-a143-8f3766f32299",
+      "name": "Plan company lookup",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -672,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// Past employers from the parsed CV -> LinkedIn company search (to get company URLs for the ex-colleague tier)\nconst res = $input.first().json || {};\nconst text = Array.isArray(res.content) ? res.content.filter(c => c.type === 'text').map(c => c.text).join('\\n') : (res.text || '');\nlet p = {};\ntry { const m = text.match(/\\{[\\s\\S]*\\}/); p = JSON.parse(m ? m[0] : text); } catch (e) { p = {}; }\n// Universities are covered by the alumni tier; a company search for them returns sub-schools (e.g. Amsterdam Business School)\nconst schools = (p.education || []).flatMap(e => [e && e.school, ...((e && e.school_aliases) || [])]).filter(Boolean).map(s => String(s).toLowerCase());\nconst isSchool = n => schools.includes(String(n).toLowerCase()) || /\\b(university|universiteit|hogeschool|college|school of)\\b/i.test(n);\nconst names = [...new Set((p.past_employers || []).map(e => e && e.name).filter(Boolean))].filter(n => !isSchool(n)).slice(0, 5);\nreturn [{ json: { names, parse_ok: !!(p.education || p.past_employers), parse_error: (p.education || p.past_employers) ? null : text.slice(0, 300) } }];\n",
+        "language": "javaScript",
+        "mode": "runOnceForAllItems"
+      }
+    },
+    {
+      "id": "ddf8e315-7cf4-4b15-ab4c-588989bcf883",
+      "name": "Past employers?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -448,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "Past employers?",
+              "leftValue": "={{ $json.names.length > 0 }}",
+              "operator": {
+                "operation": "true",
+                "singleValue": true,
+                "type": "boolean"
+              },
+              "rightValue": ""
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          }
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      }
+    },
+    {
+      "id": "c542c411-a642-4bff-b981-2e86101355c4",
+      "name": "Apify: resolve past companies",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        -224,
+        -100
+      ],
+      "parameters": {
+        "authentication": "genericCredentialType",
+        "contentType": "json",
+        "genericAuthType": "httpHeaderAuth",
+        "jsonBody": "={{ JSON.stringify({ searches: $json.names }) }}",
+        "method": "POST",
+        "options": {
+          "timeout": 300000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "url": "https://api.apify.com/v2/acts/harvestapi~linkedin-company/run-sync-get-dataset-items"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Apify API (Header Auth)"
+        }
+      },
+      "notes": "Past employer names -> LinkedIn company URLs (needed for the ex-colleague search).",
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "2b423d7a-2ca9-4253-9587-18b479107309",
+      "name": "Build pipeline items",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// Structured candidate (from Haiku) + LinkedIn URLs of past employers -> one item per job for the referral pipeline.\nconst base = $('Build candidate & jobs').first().json;\nconst user = base.user;\nconst res = $('Parse candidate').first().json || {};\n\nlet text = Array.isArray(res.content) ? res.content.filter(c => c.type === 'text').map(c => c.text).join('\\n') : (res.text || '');\nlet p = {};\ntry { const m = text.match(/\\{[\\s\\S]*\\}/); p = JSON.parse(m ? m[0] : text); } catch (e) { p = {}; }\n\n// company search results (may be absent when no past employers)\nlet companies = [];\ntry { companies = $('Apify: resolve past companies').all().map(i => i.json).filter(r => r && !r.error && /linkedin\\.com\\/company\\//.test(r.linkedinUrl || r.url || '')); } catch (e) {}\nconst norm = s => String(s || '').toLowerCase().replace(/\\(.*?\\)/g, '').replace(/[^a-z0-9]/g, '');\nfunction findCompany(name) {\n  const n = norm(name);\n  if (!n) return null;\n  return companies.find(c => norm(c.name) === n)\n    || companies.find(c => norm(c.name).includes(n) || n.includes(norm(c.name)))\n    || companies.find(c => c.originalQuery && norm(c.originalQuery.search || c.originalQuery.query) === n)\n    || null;\n}\n\nconst fullName = p.full_name || [user.first_name, user.last_name].filter(Boolean).join(' ');\nconst linkedin = user.linkedin_url || '';\nconst candidate = {\n  auth_user_id: user.auth_user_id,\n  name: fullName,\n  linkedin_url: linkedin,\n  headline: p.headline || user.profile_summary || '',\n  location: user.location || '',\n  education: (p.education || []).filter(e => e && e.school).map(e => ({\n    school: e.school, school_aliases: e.school_aliases || [], degree: e.degree || '', end_year: Number(e.end_year) || null\n  })),\n  experience: (p.past_employers || []).filter(e => e && e.name).map(e => {\n    const c = findCompany(e.name);\n    return { company: e.name, title: e.title || '', company_linkedin_url: c ? (c.linkedinUrl || c.url) : '' };\n  }),\n  skills: (() => { try { return JSON.parse(user.skills_json || '[]'); } catch (e) { return []; } })().slice(0, 15),\n  projects: (p.projects || []).slice(0, 4),\n  email_signature: [fullName, user.email, linkedin].filter(Boolean).join(' · ')\n};\n\nif (!base.jobs.length) return [];\nreturn base.jobs.map(job => ({ json: { job, candidate, auth_user_id: user.auth_user_id } }));\n",
+        "language": "javaScript",
+        "mode": "runOnceForAllItems"
+      },
+      "notes": "One item per job with { job, candidate } for the referral pipeline."
+    },
+    {
+      "id": "656d39d8-1aa3-4d4b-808e-2b9efe739c0b",
+      "name": "Remove rows without user",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1568,
+        -420
+      ],
+      "parameters": {
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "referral_drafts",
+          "cachedResultName": "referral_drafts"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "condition": "isEmpty",
+              "keyName": "auth_user_id"
+            }
+          ]
+        },
+        "matchType": "allConditions",
+        "operation": "deleteRows",
+        "options": {},
+        "resource": "row"
+      },
+      "notes": "Cleans up old demo rows that have no auth_user_id.",
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true,
+      "executeOnce": true
+    },
+    {
+      "id": "aefd8281-7b95-46c6-a4d6-522ff9e5aef3",
+      "name": "Worker run?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -1904,
+        240
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "Worker run?",
+              "leftValue": "={{ !!$json.worker_batch }}",
+              "operator": {
+                "operation": "true",
+                "singleValue": true,
+                "type": "boolean"
+              },
+              "rightValue": ""
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          }
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "notes": "true = this execution was started by the coordinator for a group of companies."
+    },
+    {
+      "id": "bf40ef9c-288e-4065-b956-3f3be0935fc9",
+      "name": "Unpack batch",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        896,
+        240
+      ],
+      "parameters": {
+        "jsCode": "return $input.first().json.worker_batch.companies.map(c => ({ json: c }));\n",
+        "language": "javaScript",
+        "mode": "runOnceForAllItems"
+      }
+    },
+    {
+      "id": "fd35845b-0efa-42fe-81a1-e2bf4dc94cea",
+      "name": "Load existing drafts",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        -1232,
+        200
+      ],
+      "parameters": {
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "referral_drafts",
+          "cachedResultName": "referral_drafts"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "condition": "eq",
+              "keyName": "auth_user_id",
+              "keyValue": "={{ $('Input').first().json.auth_user_id }}"
+            }
+          ]
+        },
+        "matchType": "allConditions",
+        "operation": "get",
+        "resource": "row",
+        "returnAll": true
+      },
+      "notes": "User-vacancy pairs that already have rows are skipped (kept as they are).",
+      "alwaysOutputData": true,
+      "executeOnce": true
+    },
+    {
+      "id": "a40c29a0-389e-48db-8d58-fc0248ed27cb",
+      "name": "New jobs?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -1008,
+        200
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "New jobs?",
+              "leftValue": "={{ $json.jobs.length > 0 }}",
+              "operator": {
+                "operation": "true",
+                "singleValue": true,
+                "type": "boolean"
+              },
+              "rightValue": ""
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          }
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      }
+    },
+    {
+      "id": "18dbcc61-219e-4de4-b024-d6d7fa2dfc49",
+      "name": "Up to date",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -784,
+        400
+      ],
+      "parameters": {
+        "jsCode": "const base = $input.first().json;\nreturn [{ json: { auth_user_id: base.auth_user_id, status: 'up_to_date', recommended_jobs: base.recommended_jobs, already_done: base.already_done, new_jobs: 0 } }];\n",
+        "language": "javaScript",
+        "mode": "runOnceForAllItems"
+      }
+    },
+    {
+      "id": "8672b4f4-8ba0-4d0c-8514-ebff8d980a82",
+      "name": "Split into workers",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        -700
+      ],
+      "parameters": {
+        "jsCode": "// Spread the companies over parallel worker runs of this same workflow.\n// Each worker handles its companies one by one, so Apify runs at most WORKERS searches at a time.\n// 2 workers: get_materials runs at the same time with 2 lanes, and Apify allows 5 concurrent runs.\nconst WORKERS = 2;\nconst companies = $input.all().map(i => i.json);\nconst n = Math.min(WORKERS, companies.length);\nconst buckets = Array.from({ length: n }, () => []);\n// largest companies (most jobs) first, round-robin\ncompanies.sort((a, b) => b.jobs.length - a.jobs.length).forEach((c, i) => buckets[i % n].push(c));\nconst id = $('Input').first().json.auth_user_id;\nreturn buckets.map((b, k) => ({ json: {\n  auth_user_id: id,\n  worker: k + 1,\n  worker_batch: { companies: b },\n  companies: b.map(c => c.company.name),\n  jobs: b.reduce((s, c) => s + c.jobs.length, 0)\n} }));\n",
+        "language": "javaScript",
+        "mode": "runOnceForAllItems"
+      },
+      "notes": "WORKERS parallel runs; companies spread round-robin."
+    },
+    {
+      "id": "b94c6245-01a1-44aa-953d-359d93878009",
+      "name": "Start workers",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        1344,
+        -700
+      ],
+      "parameters": {
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": false
+        },
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "REPLACE_WITH_ID_OF: Referals",
+          "cachedResultName": "Referals"
+        },
+        "workflowInputs": {
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false,
+          "mappingMode": "defineBelow",
+          "matchingColumns": [],
+          "schema": [
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "auth_user_id",
+              "id": "auth_user_id",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "worker_batch",
+              "id": "worker_batch",
+              "required": false,
+              "type": "object"
+            }
+          ],
+          "value": {
+            "auth_user_id": "={{ $json.auth_user_id }}",
+            "worker_batch": "={{ $json.worker_batch }}"
+          }
+        }
+      },
+      "notes": "Calls this same workflow once per worker, without waiting: the workers run in parallel."
+    },
+    {
+      "id": "67867b83-6fd3-4b7d-9838-1fd3f4ab622f",
+      "name": "Started",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1568,
+        -700
+      ],
+      "parameters": {
+        "jsCode": "const base = $('Build candidate & jobs').first().json;\nconst workers = $('Split into workers').all().map(i => ({ worker: i.json.worker, companies: i.json.companies, jobs: i.json.jobs }));\nreturn [{ json: {\n  auth_user_id: base.auth_user_id,\n  status: 'started',\n  recommended_jobs: base.recommended_jobs,\n  already_done: base.already_done,\n  new_jobs: base.jobs.length,\n  workers,\n  note: 'Workers run in parallel and write to the referral_drafts table (filter by auth_user_id).'\n} }];\n",
+        "language": "javaScript",
+        "mode": "runOnceForAllItems"
+      }
+    }
+  ],
+  "connections": {
+    "When called by pipeline": {
+      "main": [
+        [
+          {
+            "node": "Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Settings": {
+      "main": [
+        [
+          {
+            "node": "Load contacted people",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load contacted people": {
+      "main": [
+        [
+          {
+            "node": "Normalize & group",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop companies": {
+      "main": [
+        [
+          {
+            "node": "Collect results",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Job keywords",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Job keywords": {
+      "main": [
+        [
+          {
+            "node": "Parse keywords",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse keywords": {
+      "main": [
+        [
+          {
+            "node": "Plan tier 1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Plan tier 1": {
+      "main": [
+        [
+          {
+            "node": "Tier 1 on?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tier 1 on?": {
+      "main": [
+        [
+          {
+            "node": "Apify: alumni search",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Collect tier 1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Apify: alumni search": {
+      "main": [
+        [
+          {
+            "node": "Collect tier 1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect tier 1": {
+      "main": [
+        [
+          {
+            "node": "Enough?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enough?": {
+      "main": [
+        [
+          {
+            "node": "Score & shortlist",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Plan fallback searches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Plan fallback searches": {
+      "main": [
+        [
+          {
+            "node": "Run fallback?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run fallback?": {
+      "main": [
+        [
+          {
+            "node": "Apify: fallback search",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Score & shortlist",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Apify: fallback search": {
+      "main": [
+        [
+          {
+            "node": "Collect fallback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect fallback": {
+      "main": [
+        [
+          {
+            "node": "Score & shortlist",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Score & shortlist": {
+      "main": [
+        [
+          {
+            "node": "Enrich on?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enrich on?": {
+      "main": [
+        [
+          {
+            "node": "Apify: company info",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Rescore & expand",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Apify: enrich profiles": {
+      "main": [
+        [
+          {
+            "node": "Collect enrichment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect enrichment": {
+      "main": [
+        [
+          {
+            "node": "Need email fallback?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Need email fallback?": {
+      "main": [
+        [
+          {
+            "node": "Build finder input",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Rescore & expand",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build finder input": {
+      "main": [
+        [
+          {
+            "node": "Domain found?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Domain found?": {
+      "main": [
+        [
+          {
+            "node": "Apify: email finder",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Rescore & expand",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Apify: email finder": {
+      "main": [
+        [
+          {
+            "node": "Collect emails",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect emails": {
+      "main": [
+        [
+          {
+            "node": "Rescore & expand",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rescore & expand": {
+      "main": [
+        [
+          {
+            "node": "Drafts on?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Drafts on?": {
+      "main": [
+        [
+          {
+            "node": "Draft messages",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Format job result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Draft messages": {
+      "main": [
+        [
+          {
+            "node": "Format job result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format job result": {
+      "main": [
+        [
+          {
+            "node": "Loop companies",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build draft rows": {
+      "main": [
+        [
+          {
+            "node": "Any drafts?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Any drafts?": {
+      "main": [
+        [
+          {
+            "node": "Save drafts",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Return results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save drafts": {
+      "main": [
+        [
+          {
+            "node": "Return results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Apify: company info": {
+      "main": [
+        [
+          {
+            "node": "Apify: enrich profiles",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Test user",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Test user": {
+      "main": [
+        [
+          {
+            "node": "Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load user": {
+      "main": [
+        [
+          {
+            "node": "Load user jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load user jobs": {
+      "main": [
+        [
+          {
+            "node": "Load jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse candidate": {
+      "main": [
+        [
+          {
+            "node": "Plan company lookup",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Plan company lookup": {
+      "main": [
+        [
+          {
+            "node": "Past employers?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Past employers?": {
+      "main": [
+        [
+          {
+            "node": "Apify: resolve past companies",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build pipeline items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Apify: resolve past companies": {
+      "main": [
+        [
+          {
+            "node": "Build pipeline items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build pipeline items": {
+      "main": [
+        [
+          {
+            "node": "Settings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Remove rows without user": {
+      "main": [
+        [
+          {
+            "node": "Build draft rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Input": {
+      "main": [
+        [
+          {
+            "node": "Worker run?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Worker run?": {
+      "main": [
+        [
+          {
+            "node": "Unpack batch",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Load user",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Unpack batch": {
+      "main": [
+        [
+          {
+            "node": "Loop companies",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load jobs": {
+      "main": [
+        [
+          {
+            "node": "Load existing drafts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load existing drafts": {
+      "main": [
+        [
+          {
+            "node": "Build candidate & jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build candidate & jobs": {
+      "main": [
+        [
+          {
+            "node": "New jobs?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "New jobs?": {
+      "main": [
+        [
+          {
+            "node": "Parse candidate",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Up to date",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize & group": {
+      "main": [
+        [
+          {
+            "node": "Split into workers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split into workers": {
+      "main": [
+        [
+          {
+            "node": "Start workers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Start workers": {
+      "main": [
+        [
+          {
+            "node": "Started",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect results": {
+      "main": [
+        [
+          {
+            "node": "Remove rows without user",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "pinData": {}
+}

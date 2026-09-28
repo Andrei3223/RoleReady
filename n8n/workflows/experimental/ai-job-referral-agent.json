@@ -1,0 +1,1166 @@
+{
+  "name": "AI Job Referral Agent",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "lovable-job-referral",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "8bd41ba2-66a9-4f3f-9370-f5cff796fe8b",
+      "name": "Lovable Referral Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        624
+      ],
+      "webhookId": "d7b54942-86fa-49d7-9fd2-7be912420703"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1",
+              "name": "action",
+              "value": "={{ $json.body.action }}",
+              "type": "string"
+            },
+            {
+              "id": "a2",
+              "name": "auth_user_id",
+              "value": "={{ $json.body.auth_user_id }}",
+              "type": "string"
+            },
+            {
+              "id": "a3",
+              "name": "job_id",
+              "value": "={{ $json.body.job_id }}",
+              "type": "string"
+            },
+            {
+              "id": "a4",
+              "name": "connection_id",
+              "value": "={{ $json.body.connection_id }}",
+              "type": "string"
+            },
+            {
+              "id": "a5",
+              "name": "contact_id",
+              "value": "={{ $json.body.contact_id }}",
+              "type": "string"
+            },
+            {
+              "id": "a6",
+              "name": "draft_ref",
+              "value": "={{ $json.body.draft_id || $json.body.contact_id }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "9dd38120-0c57-43dd-a116-ceb0a938c352",
+      "name": "Normalize Input",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        224,
+        624
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "r0",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "generate_referral",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "generate_referral"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "r1",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "create_gmail_draft",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "create_gmail_draft"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra",
+          "renameFallbackOutput": "Invalid Action"
+        }
+      },
+      "id": "5ca99826-a694-4568-9aa5-966399131dbb",
+      "name": "Route Action",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        448,
+        608
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "users",
+          "cachedResultName": "users"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "auth_user_id",
+              "keyValue": "={{ $(\"Normalize Input\").first().json.auth_user_id }}"
+            }
+          ]
+        },
+        "limit": 1
+      },
+      "id": "356679ce-daf4-429f-8664-ba8d3b4bf36d",
+      "name": "Get User",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        672,
+        224
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "jobs",
+          "cachedResultName": "jobs"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "job_id",
+              "keyValue": "={{ $(\"Normalize Input\").first().json.job_id }}"
+            }
+          ]
+        },
+        "limit": 1
+      },
+      "id": "c5ae188c-daf8-4e09-a0e3-2e5456424d14",
+      "name": "Get Job",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        896,
+        224
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "user_jobs",
+          "cachedResultName": "user_jobs"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "auth_user_id",
+              "keyValue": "={{ $(\"Normalize Input\").first().json.auth_user_id }}"
+            },
+            {
+              "keyName": "job_id",
+              "keyValue": "={{ $(\"Normalize Input\").first().json.job_id }}"
+            }
+          ]
+        },
+        "limit": 1
+      },
+      "id": "57867558-e2a4-41aa-94b4-5b29010ae3ab",
+      "name": "Get User Job",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1120,
+        224
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "referral_drafts",
+          "cachedResultName": "referral_drafts"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyValue": "={{ $(\"Normalize Input\").first().json.draft_ref }}"
+            },
+            {
+              "keyName": "auth_user_id",
+              "keyValue": "={{ $(\"Normalize Input\").first().json.auth_user_id }}"
+            }
+          ]
+        },
+        "limit": 1
+      },
+      "id": "06c33440-fa44-4d90-bba9-ede7fd8319dc",
+      "name": "Get Referral Draft",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1344,
+        224
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const req = $('Normalize Input').first().json;\nconst pick = (items, key) => {\n  for (const it of items) {\n    const jj = (it && it.json) ? it.json : {};\n    if (jj[key] !== undefined && jj[key] !== null && jj[key] !== '') return jj;\n  }\n  return null;\n};\nconst user = pick($('Get User').all(), 'auth_user_id');\nconst job = pick($('Get Job').all(), 'job_id');\nconst userJob = pick($('Get User Job').all(), 'job_id');\nconst draft = pick($('Get Referral Draft').all(), 'auth_user_id');\nlet error = null, code = null, http = 200;\nif (!user) { error = 'Authenticated user not found'; code = 'USER_NOT_FOUND'; http = 404; }\nelse if (!job) { error = 'Job not found'; code = 'JOB_NOT_FOUND'; http = 404; }\nelse if (!userJob) { error = 'User is not linked to this job'; code = 'USER_JOB_NOT_FOUND'; http = 404; }\nelse if (!draft) { error = 'Referral draft/contact not found for this user and job'; code = 'DRAFT_NOT_FOUND'; http = 404; }\nelse if (String(draft.auth_user_id) !== String(req.auth_user_id)) { error = 'Draft does not belong to the authenticated user'; code = 'FORBIDDEN'; http = 403; }\nelse if (String(draft.job_id) !== String(req.job_id)) { error = 'Draft does not match the requested job'; code = 'JOB_MISMATCH'; http = 403; }\nif (error) {\n  return [{ json: { ok: false, success: false, error: error, code: code, http_code: http } }];\n}\nreturn [{ json: { ok: true, http_code: 200, draft_row_id: draft.id, req: req, user: user, job: job, userJob: userJob, draft: draft } }];"
+      },
+      "id": "33615389-2996-46db-bf5f-393a8eb8d640",
+      "name": "Validate Referral Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1568,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "v1",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "bd8cff08-68cc-4e49-9ab6-b0582dbcdf62",
+      "name": "Is Referral Valid",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1792,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const c = $json;\nconst u = c.user || {};\nconst j = c.job || {};\nconst uj = c.userJob || {};\nconst d = c.draft || {};\nconst LF = String.fromCharCode(10);\nconst s = (v) => (v === undefined || v === null) ? '' : String(v);\nconst arr = (v) => { try { const a = JSON.parse(v); return Array.isArray(a) ? a : []; } catch (e) { return []; } };\nconst skills = arr(u.skills_json).join(', ');\nconst experience = arr(u.experience_json).join('; ');\nconst education = arr(u.education_json).join('; ');\nconst matched = arr(uj.matched_skills_json).join(', ');\nconst missing = arr(uj.missing_skills_json).join(', ');\nconst systemLines = [\n  'You are an expert career assistant that writes short, warm, human referral outreach messages.',\n  'Strict rules:',\n  '- NEVER invent work experience, companies, skills, education, achievements, relationships, or contact information.',\n  '- Only use facts explicitly provided below. If an important detail is missing, use a natural generic phrasing instead of inventing anything.',\n  '- Keep it concise, professional and genuinely human. Do NOT sound like mass AI-generated outreach.',\n  '- Do not fabricate a personal relationship with the contact beyond what the provided relationship data states.',\n  'Respond ONLY with a valid JSON object with exactly these keys: \"subject\" (string), \"body\" (string, the email body), \"linkedin_message\" (string, a short optional LinkedIn note under 300 characters).'\n];\nconst candidateName = (s(u.first_name) + ' ' + s(u.last_name)).trim();\nconst userLines = [\n  'CANDIDATE PROFILE:',\n  'Name: ' + candidateName,\n  'Email: ' + s(u.email),\n  'Location: ' + s(u.location),\n  'Profile summary: ' + s(u.profile_summary),\n  'Relevant skills: ' + skills,\n  'Experience: ' + experience,\n  'Education: ' + education,\n  '',\n  'TARGET JOB:',\n  'Title: ' + s(j.title),\n  'Company: ' + s(j.company_name),\n  'Location: ' + s(j.location),\n  'Job URL: ' + s(j.job_url),\n  'Description: ' + s(j.description).slice(0, 1500),\n  '',\n  'MATCH CONTEXT:',\n  'Match score: ' + s(uj.match_score),\n  'Match reason: ' + s(uj.match_reason),\n  'Matched skills: ' + matched,\n  'Missing skills: ' + missing,\n  'Application status: ' + s(uj.status),\n  '',\n  'CONTACT / CONNECTION:',\n  'Name: ' + s(d.contact_name),\n  'Headline/role: ' + s(d.contact_headline),\n  'Relationship tier: ' + s(d.tier),\n  'Relationship reasons: ' + s(d.match_reasons),\n  'Preferred channel: ' + s(d.channel),\n  'Previous contact status: ' + s(d.status),\n  '',\n  'Write the referral outreach now as JSON only.'\n];\nreturn [{ json: Object.assign({}, c, { prompt_system: systemLines.join(LF), prompt_user: userLines.join(LF) }) }];"
+      },
+      "id": "72c2e1fc-2580-42af-89c7-efcbc16290a8",
+      "name": "Build Referral Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2016,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-4o-mini",
+          "cachedResultName": "gpt-4o-mini"
+        },
+        "responses": {
+          "values": [
+            {
+              "role": "system",
+              "content": "={{ $json.prompt_system }}"
+            },
+            {
+              "content": "={{ $json.prompt_user }}"
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {
+          "maxTokens": 900,
+          "temperature": 0.6
+        }
+      },
+      "id": "5ef8938b-d8a3-4875-89d4-46c2a5abe374",
+      "name": "Generate Referral Email",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2.3,
+      "position": [
+        2240,
+        128
+      ],
+      "credentials": {
+        "openAiApi": {
+          "name": "OpenAI account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "s1",
+              "name": "subject",
+              "value": "={{ $json.output[0].content[0].text.subject }}",
+              "type": "string"
+            },
+            {
+              "id": "s2",
+              "name": "body",
+              "value": "={{ $json.output[0].content[0].text.body }}",
+              "type": "string"
+            },
+            {
+              "id": "s3",
+              "name": "linkedin_message",
+              "value": "={{ $json.output[0].content[0].text.linkedin_message }}",
+              "type": "string"
+            },
+            {
+              "id": "s4",
+              "name": "draft_row_id",
+              "value": "={{ $(\"Build Referral Prompt\").item.json.draft_row_id }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "d9567f74-1961-4284-a725-cb92d528930a",
+      "name": "Shape Referral Result",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        2464,
+        48
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "referral_drafts",
+          "cachedResultName": "referral_drafts"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyValue": "={{ $(\"Shape Referral Result\").item.json.draft_row_id }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "subject": "={{ $(\"Shape Referral Result\").item.json.subject }}",
+            "body": "={{ $(\"Shape Referral Result\").item.json.body }}",
+            "linkedin_note": "={{ $(\"Shape Referral Result\").item.json.linkedin_message }}",
+            "status": "draft"
+          }
+        },
+        "options": {}
+      },
+      "id": "58a9cf66-8510-41da-97c5-94f23fd3c0d8",
+      "name": "Update Referral Draft",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        2688,
+        48
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ ({ success: true, action: 'generate_referral', draft_id: $('Shape Referral Result').item.json.draft_row_id, subject: $('Shape Referral Result').item.json.subject, body: $('Shape Referral Result').item.json.body, linkedin_message: $('Shape Referral Result').item.json.linkedin_message }) }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "31597fd5-2354-4cd2-8afe-3313c9f0a79a",
+      "name": "Respond Referral Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        2912,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ ({ success: false, error: 'Failed to generate or save the referral', code: 'REFERRAL_GENERATION_FAILED' }) }}",
+        "options": {
+          "responseCode": 500
+        }
+      },
+      "id": "267dec66-3c20-4feb-b5ff-873ab90495fc",
+      "name": "Respond Referral Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        2912,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ ({ success: false, error: $json.error, code: $json.code }) }}",
+        "options": {
+          "responseCode": "={{ $json.http_code }}"
+        }
+      },
+      "id": "5b1f9cbe-628c-4c8b-b7af-c75cf3ddbef9",
+      "name": "Respond Referral Invalid",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        2016,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "referral_drafts",
+          "cachedResultName": "referral_drafts"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyValue": "={{ $(\"Normalize Input\").first().json.draft_ref }}"
+            },
+            {
+              "keyName": "auth_user_id",
+              "keyValue": "={{ $(\"Normalize Input\").first().json.auth_user_id }}"
+            }
+          ]
+        },
+        "limit": 1
+      },
+      "id": "3b5951e7-d482-4bb6-82fd-51082c2cf447",
+      "name": "Get Draft For Gmail",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        672,
+        624
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const req = $('Normalize Input').first().json;\nconst pick = (items, key) => {\n  for (const it of items) {\n    const jj = (it && it.json) ? it.json : {};\n    if (jj[key] !== undefined && jj[key] !== null && jj[key] !== '') return jj;\n  }\n  return null;\n};\nconst draft = pick($('Get Draft For Gmail').all(), 'auth_user_id');\nlet error = null, code = null, http = 200;\nif (!draft) { error = 'Referral draft not found'; code = 'DRAFT_NOT_FOUND'; http = 404; }\nelse if (String(draft.auth_user_id) !== String(req.auth_user_id)) { error = 'Draft does not belong to the authenticated user'; code = 'FORBIDDEN'; http = 403; }\nelse if (!draft.email || String(draft.email).trim() === '') { error = 'Contact email is missing'; code = 'CONTACT_EMAIL_MISSING'; http = 422; }\nif (error) { return [{ json: { ok: false, success: false, error: error, code: code, http_code: http } }]; }\nreturn [{ json: { ok: true, http_code: 200, draft_row_id: draft.id, email: draft.email, subject: draft.subject, body: draft.body, contact_name: draft.contact_name } }];"
+      },
+      "id": "ccae4d13-fec9-42a0-a236-33e9535bf8e2",
+      "name": "Validate Gmail Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        896,
+        624
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "g1",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "5ee8a5a7-c1c4-4f56-bbe4-c04509402a57",
+      "name": "Is Gmail Request Valid",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1120,
+        624
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "draft",
+        "subject": "={{ $(\"Validate Gmail Request\").item.json.subject }}",
+        "message": "={{ $(\"Validate Gmail Request\").item.json.body }}",
+        "options": {
+          "sendTo": "={{ $(\"Validate Gmail Request\").item.json.email }}"
+        }
+      },
+      "id": "677e3051-a480-42bf-8a41-9302bba83bf9",
+      "name": "Create Gmail Draft",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        1344,
+        528
+      ],
+      "webhookId": "544bbc4e-2743-4948-917c-e61563d694f7",
+      "credentials": {
+        "gmailOAuth2": {
+          "name": "Gmail account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "referral_drafts",
+          "cachedResultName": "referral_drafts"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyValue": "={{ $(\"Validate Gmail Request\").item.json.draft_row_id }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "gmail_draft_id": "={{ $(\"Create Gmail Draft\").item.json.id }}",
+            "email_status": "drafted",
+            "status": "gmail_draft_created"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "job_id",
+              "displayName": "job_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "job_title",
+              "displayName": "job_title",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "company",
+              "displayName": "company",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "job_url",
+              "displayName": "job_url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "contact_name",
+              "displayName": "contact_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "contact_linkedin_url",
+              "displayName": "contact_linkedin_url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "contact_headline",
+              "displayName": "contact_headline",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "tier",
+              "displayName": "tier",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "score",
+              "displayName": "score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "match_reasons",
+              "displayName": "match_reasons",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "email",
+              "displayName": "email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "email_status",
+              "displayName": "email_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "channel",
+              "displayName": "channel",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "subject",
+              "displayName": "subject",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "body",
+              "displayName": "body",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "linkedin_note",
+              "displayName": "linkedin_note",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "auth_user_id",
+              "displayName": "auth_user_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "gmail_draft_id",
+              "displayName": "gmail_draft_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "8ff02f08-80bd-4378-a40f-1faab8f12983",
+      "name": "Store Gmail Draft ID",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1568,
+        464
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ ({ success: true, action: 'create_gmail_draft', draft_id: $('Validate Gmail Request').item.json.draft_row_id, gmail_draft_id: $('Create Gmail Draft').item.json.id, subject: $('Validate Gmail Request').item.json.subject }) }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "c4ca99fe-bec8-4099-b372-2c46c3af4277",
+      "name": "Respond Gmail Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1792,
+        416
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ ({ success: false, error: 'Failed to create the Gmail draft', code: 'GMAIL_DRAFT_FAILED' }) }}",
+        "options": {
+          "responseCode": 502
+        }
+      },
+      "id": "e65ca55b-a7cc-475b-b69f-3256a8a0ae3e",
+      "name": "Respond Gmail Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1792,
+        624
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ ({ success: false, error: $json.error, code: $json.code }) }}",
+        "options": {
+          "responseCode": "={{ $json.http_code }}"
+        }
+      },
+      "id": "733ac883-cfb1-4c61-8bd5-b829348d4ea6",
+      "name": "Respond Gmail Invalid",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1344,
+        720
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ ({ success: false, error: 'Unknown or missing action', code: 'INVALID_ACTION' }) }}",
+        "options": {
+          "responseCode": 400
+        }
+      },
+      "id": "7f90ea1b-baa8-4130-9697-45b07107c992",
+      "name": "Respond Invalid Action",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        672,
+        816
+      ]
+    }
+  ],
+  "connections": {
+    "Lovable Referral Webhook": {
+      "main": [
+        [
+          {
+            "node": "Normalize Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Input": {
+      "main": [
+        [
+          {
+            "node": "Route Action",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route Action": {
+      "main": [
+        [
+          {
+            "node": "Get User",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Get Draft For Gmail",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Invalid Action",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get User": {
+      "main": [
+        [
+          {
+            "node": "Get Job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Job": {
+      "main": [
+        [
+          {
+            "node": "Get User Job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get User Job": {
+      "main": [
+        [
+          {
+            "node": "Get Referral Draft",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Referral Draft": {
+      "main": [
+        [
+          {
+            "node": "Validate Referral Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Referral Request": {
+      "main": [
+        [
+          {
+            "node": "Is Referral Valid",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Referral Valid": {
+      "main": [
+        [
+          {
+            "node": "Build Referral Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Referral Invalid",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Referral Prompt": {
+      "main": [
+        [
+          {
+            "node": "Generate Referral Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Referral Email": {
+      "main": [
+        [
+          {
+            "node": "Shape Referral Result",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Referral Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Shape Referral Result": {
+      "main": [
+        [
+          {
+            "node": "Update Referral Draft",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Referral Draft": {
+      "main": [
+        [
+          {
+            "node": "Respond Referral Success",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Referral Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Draft For Gmail": {
+      "main": [
+        [
+          {
+            "node": "Validate Gmail Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Gmail Request": {
+      "main": [
+        [
+          {
+            "node": "Is Gmail Request Valid",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Gmail Request Valid": {
+      "main": [
+        [
+          {
+            "node": "Create Gmail Draft",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Gmail Invalid",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Gmail Draft": {
+      "main": [
+        [
+          {
+            "node": "Store Gmail Draft ID",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Gmail Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store Gmail Draft ID": {
+      "main": [
+        [
+          {
+            "node": "Respond Gmail Success",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Gmail Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "pinData": {}
+}

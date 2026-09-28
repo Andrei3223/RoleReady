@@ -1,0 +1,266 @@
+{
+  "name": "GET_USER_JOBS",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "jobs",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "id": "25535400-81d4-4f16-953e-0fbb0a952dbf",
+      "name": "Webhook GET jobs",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        96
+      ],
+      "webhookId": "a1747946-1d81-4929-bcdc-9dbc2b5ed8d8"
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "users",
+          "cachedResultName": "users"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "auth_user_id",
+              "keyValue": "={{ $json.query.auth_user_id }}"
+            }
+          ]
+        },
+        "limit": 1
+      },
+      "id": "8c6037d8-8dac-4414-899a-a2d1e62eae81",
+      "name": "Find User",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        224,
+        96
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "user-exists-cond",
+              "leftValue": "={{ ($json.id ?? \"\").toString() }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "16064ff7-8183-4a99-90d5-094579fe0af8",
+      "name": "User Exists",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        448,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "user_jobs",
+          "cachedResultName": "user_jobs"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "user_id",
+              "keyValue": "={{ ($json.id ?? \"\").toString() }}"
+            }
+          ]
+        },
+        "returnAll": true
+      },
+      "id": "f389c590-02bb-4ee6-9453-97fef3ed9b09",
+      "name": "Find User Jobs",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        672,
+        0
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "jobs",
+          "cachedResultName": "jobs"
+        },
+        "returnAll": true
+      },
+      "id": "de06cd37-6349-422f-9afe-08b4c2ab3a4c",
+      "name": "Find Jobs",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        896,
+        0
+      ],
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const userJobsRaw = $('Find User Jobs').all().map(i => i.json);\nconst jobsRaw = $('Find Jobs').all().map(i => i.json);\n\n// Drop empty placeholder items produced by alwaysOutputData when there are no rows\nconst userJobs = userJobsRaw.filter(r => r && r.user_id);\n\nconst jobsById = {};\nfor (const j of jobsRaw) {\n  if (j && j.job_id) jobsById[j.job_id] = j;\n}\n\nfunction parseArr(v) {\n  if (v === null || v === undefined || v === '') return [];\n  if (Array.isArray(v)) return v;\n  try {\n    const parsed = JSON.parse(v);\n    return Array.isArray(parsed) ? parsed : [];\n  } catch (e) {\n    return [];\n  }\n}\n\n// Interview-prep plan written by get_materials into user_jobs.prep_* (null until prep_status = 'ready')\nfunction prepOf(uj) {\n  if (uj.prep_status !== 'ready') return null;\n  return {\n    role_type: uj.prep_role_type ?? null,\n    skill_gaps: parseArr(uj.prep_skill_gaps_json),            // [{skill, why}]\n    courses: parseArr(uj.prep_courses_json),                   // [{title, url, why}]\n    practice: parseArr(uj.prep_practice_json),                 // [{title, url, type, why}]\n    interview_insights: parseArr(uj.prep_interview_insights_json), // [{insight, source_url}]\n    likely_questions: parseArr(uj.prep_likely_questions_json), // [{question, answer_hint, source}]\n    plan: parseArr(uj.prep_plan_json),                         // [{day, focus, tasks[]}]\n    plan_markdown: uj.prep_plan_markdown ?? null,\n    data_quality: uj.prep_data_quality ?? null,\n    updated_at: uj.prep_updated_at ?? null,\n  };\n}\n\nconst result = [];\nfor (const uj of userJobs) {\n  if (uj.hidden === true) continue;\n  const job = jobsById[uj.job_id];\n  if (!job) continue;\n  if (job.is_active === false) continue;\n\n  result.push({\n    id: job.job_id,\n    title: job.title ?? null,\n    company_name: job.company_name ?? null,\n    company_url: job.company_url ?? null,\n    job_url: job.job_url ?? null,\n    location: job.location ?? null,\n    remote_type: job.remote_type ?? null,\n    employment_type: job.employment_type ?? null,\n    description: job.description ?? null,\n    seniority: job.seniority ?? null,\n    salary_min: job.salary_min ?? null,\n    salary_max: job.salary_max ?? null,\n    salary_currency: job.salary_currency ?? null,\n    published_at: job.published_at ?? null,\n\n    match_score: uj.match_score ?? null,\n    priority_score: uj.priority_score ?? null,\n    status: uj.status ?? null,\n    match_reason: uj.match_reason ?? null,\n    company_risk_score: uj.company_risk_score ?? null,\n    saved: uj.saved ?? false,\n    applied_at: uj.applied_at ?? null,\n    interview_at: uj.interview_at ?? null,\n\n    matched_skills: parseArr(uj.matched_skills_json),\n    missing_skills: parseArr(uj.missing_skills_json),\n\n    // 'ready' when the interview-prep plan exists, otherwise 'pending' (get_materials still has to run)\n    prep_status: uj.prep_status === 'ready' ? 'ready' : 'pending',\n    prep: prepOf(uj),\n  });\n}\n\nresult.sort((a, b) => {\n  const p = (b.priority_score ?? 0) - (a.priority_score ?? 0);\n  if (p !== 0) return p;\n  return (b.match_score ?? 0) - (a.match_score ?? 0);\n});\n\nreturn [{ json: { success: true, count: result.length, jobs: result } }];\n"
+      },
+      "id": "ca8d3bc6-8e33-4223-9031-5db0258d396f",
+      "name": "Assemble Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "773b7244-e1fa-4313-9c51-234bee2df223",
+      "name": "Respond Jobs",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1344,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\"success\":true,\"count\":0,\"jobs\":[]}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "31cc50f5-ddd2-4e25-aa9b-903c7d124aad",
+      "name": "Respond Empty",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        672,
+        192
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook GET jobs": {
+      "main": [
+        [
+          {
+            "node": "Find User",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find User": {
+      "main": [
+        [
+          {
+            "node": "User Exists",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "User Exists": {
+      "main": [
+        [
+          {
+            "node": "Find User Jobs",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Empty",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find User Jobs": {
+      "main": [
+        [
+          {
+            "node": "Find Jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Jobs": {
+      "main": [
+        [
+          {
+            "node": "Assemble Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Assemble Response": {
+      "main": [
+        [
+          {
+            "node": "Respond Jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "pinData": {}
+}

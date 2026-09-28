@@ -1,0 +1,127 @@
+{
+  "name": "GET_JOB_REFERRAL",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "job-referral",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "id": "0cc2ec64-2360-4a82-a160-88c208fcbc97",
+      "name": "Webhook GET job-referral",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        -16
+      ],
+      "webhookId": "b01f7860-ce92-4b77-b2da-ffd441278b55"
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "referral_drafts",
+          "cachedResultName": "referral_drafts"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "auth_user_id",
+              "keyValue": "={{ String($json.query.auth_user_id ?? '').trim() }}"
+            },
+            {
+              "keyName": "job_id",
+              "keyValue": "={{ String($json.query.job_id ?? '').trim() }}"
+            }
+          ]
+        },
+        "returnAll": true
+      },
+      "id": "8d0af81a-28a2-42e1-a359-1b32c23fc01d",
+      "name": "Find Referral Drafts",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        224,
+        0
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Returns the referral_drafts contacts for (auth_user_id, job_id), sorted by score.\nconst q = $('Webhook GET job-referral').first().json.query || {};\nconst authUserId = String(q.auth_user_id ?? '').trim();\nconst jobId = String(q.job_id ?? '').trim();\n\nif (!authUserId || !jobId) {\n  return [{ json: { success: false, error: !authUserId ? 'missing_auth_user_id' : 'missing_job_id', auth_user_id: authUserId || null, job_id: jobId || null, contacts_count: 0, contacts: [] } }];\n}\n\nconst rows = $('Find Referral Drafts').all().map(i => i.json).filter(r => r && r.job_id);\nif (rows.length === 0) {\n  return [{ json: { success: true, auth_user_id: authUserId, job_id: jobId, job_title: null, company: null, job_url: null, status: 'not_generated', contacts_count: 0, contacts: [] } }];\n}\n\nconst first = rows[0];\nconst contacts = [];\nfor (const r of rows) {\n  // marker row written by Referals when no contacts were found for this job\n  if (r.status === 'no_contacts' && !r.contact_linkedin_url && !r.contact_name) continue;\n  contacts.push({\n    draft_id: r.id,\n    contact_name: r.contact_name || null,\n    contact_linkedin_url: r.contact_linkedin_url || null,\n    contact_headline: r.contact_headline || null,\n    tier: r.tier || null,\n    score: r.score ?? 0,\n    match_reasons: String(r.match_reasons || '').split('; ').filter(Boolean),\n    email: r.email || null,\n    email_status: r.email_status || null,\n    channel: r.channel || null,\n    subject: r.subject || null,\n    body: r.body || null,\n    linkedin_note: r.linkedin_note || null,\n    gmail_draft_id: r.gmail_draft_id || null,\n    status: r.status || null,\n  });\n}\ncontacts.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));\n\nreturn [{ json: {\n  success: true,\n  auth_user_id: authUserId,\n  job_id: jobId,\n  job_title: first.job_title || null,\n  company: first.company || null,\n  job_url: first.job_url || null,\n  status: contacts.length > 0 ? 'drafted' : 'no_contacts',\n  contacts_count: contacts.length,\n  contacts,\n} }];\n"
+      },
+      "id": "2b91c94f-0772-49c5-80c9-077e66ef3406",
+      "name": "Assemble Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "12b609c3-845f-4e33-be8d-b5685fde4b62",
+      "name": "Respond Job Referral",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        672,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook GET job-referral": {
+      "main": [
+        [
+          {
+            "node": "Find Referral Drafts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Referral Drafts": {
+      "main": [
+        [
+          {
+            "node": "Assemble Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Assemble Response": {
+      "main": [
+        [
+          {
+            "node": "Respond Job Referral",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "pinData": {}
+}

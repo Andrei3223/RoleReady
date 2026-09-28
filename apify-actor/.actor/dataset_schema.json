@@ -1,0 +1,77 @@
+{
+    "actorSpecification": 1,
+    "fields": {},
+    "views": {
+        "overview": {
+            "title": "Vacancies",
+            "transformation": {
+                "fields": [
+                    "title",
+                    "company_name",
+                    "location",
+                    "match_score",
+                    "match_reason",
+                    "job_url",
+                    "prep_status",
+                    "referral_status",
+                    "referral_contacts_count"
+                ]
+            },
+            "display": {
+                "component": "table",
+                "properties": {
+                    "title": { "label": "Job title", "format": "text" },
+                    "company_name": { "label": "Company", "format": "text" },
+                    "location": { "label": "Location", "format": "text" },
+                    "match_score": { "label": "Match", "format": "number" },
+                    "match_reason": { "label": "Why it matches", "format": "text" },
+                    "job_url": { "label": "Link", "format": "link" },
+                    "prep_status": { "label": "Interview prep", "format": "text" },
+                    "referral_status": { "label": "Referrals", "format": "text" },
+                    "referral_contacts_count": { "label": "Contacts", "format": "number" }
+                }
+            }
+        },
+        "interview_prep": {
+            "title": "Interview prep",
+            "transformation": {
+                "fields": ["title", "company_name", "prep_status", "prep.data_quality", "prep.plan_markdown"],
+                "flatten": ["prep"]
+            },
+            "display": {
+                "component": "table",
+                "properties": {
+                    "title": { "label": "Job title", "format": "text" },
+                    "company_name": { "label": "Company", "format": "text" },
+                    "prep_status": { "label": "Status", "format": "text" },
+                    "prep.data_quality": { "label": "Data quality", "format": "text" },
+                    "prep.plan_markdown": { "label": "Plan", "format": "text" }
+                }
+            }
+        },
+        "referrals": {
+            "title": "Referral contacts",
+            "transformation": {
+                "fields": ["title", "company_name", "contact_name", "contact_headline", "tier", "match_reasons", "channel", "email", "subject", "body", "linkedin_note", "contact_linkedin_url"],
+                "unwind": ["referral_contacts"]
+            },
+            "display": {
+                "component": "table",
+                "properties": {
+                    "title": { "label": "Job title", "format": "text" },
+                    "company_name": { "label": "Company", "format": "text" },
+                    "contact_name": { "label": "Contact", "format": "text" },
+                    "contact_headline": { "label": "Headline", "format": "text" },
+                    "tier": { "label": "Why this person", "format": "text" },
+                    "match_reasons": { "label": "Shared background", "format": "array" },
+                    "channel": { "label": "Channel", "format": "text" },
+                    "email": { "label": "Email", "format": "text" },
+                    "subject": { "label": "Subject", "format": "text" },
+                    "body": { "label": "Draft email", "format": "text" },
+                    "linkedin_note": { "label": "LinkedIn note", "format": "text" },
+                    "contact_linkedin_url": { "label": "LinkedIn", "format": "link" }
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,333 @@
+{
+  "name": "GET_COURSE",
+  "nodes": [
+    {
+      "id": "72fec108-75f5-4115-a1ab-54c11cdaddbb",
+      "name": "Webhook GET course",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        96
+      ],
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "course",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "webhookId": "4a9e6d8f-e2a6-45f6-96ea-f226e665fee8"
+    },
+    {
+      "id": "4346459e-873f-4fb2-8bc3-66cf2ea42720",
+      "name": "Find User",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        224,
+        96
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "users",
+          "cachedResultName": "users"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "auth_user_id",
+              "condition": "eq",
+              "keyValue": "={{ $json.query.auth_user_id }}"
+            }
+          ]
+        },
+        "returnAll": false,
+        "limit": 1
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "5b2844a8-69e9-4967-b30f-a5d4db6dd4f0",
+      "name": "User Exists",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        448,
+        96
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "user-exists-cond",
+              "leftValue": "={{ ($json.id ?? \"\").toString() }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "04a4c67c-c1fd-4792-b5a6-e7585f6aa05b",
+      "name": "Find Course",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        672,
+        0
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "courses",
+          "cachedResultName": "courses"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "course_id",
+              "condition": "eq",
+              "keyValue": "={{ $(\"Webhook GET course\").item.json.query.course_id }}"
+            }
+          ]
+        },
+        "returnAll": false,
+        "limit": 1
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "9b184cae-e65b-4c9d-80ca-b5e9a402607c",
+      "name": "Find Course Modules",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        896,
+        0
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "course_modules",
+          "cachedResultName": "course_modules"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "course_id",
+              "condition": "eq",
+              "keyValue": "={{ $(\"Webhook GET course\").item.json.query.course_id }}"
+            }
+          ]
+        },
+        "returnAll": true
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "0121501d-c2f1-49ef-a94a-1081aa657963",
+      "name": "Find User Learning",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1120,
+        0
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "user_learning",
+          "cachedResultName": "user_learning"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "user_id",
+              "condition": "eq",
+              "keyValue": "={{ $(\"Find User\").item.json.id }}"
+            },
+            {
+              "keyName": "course_id",
+              "condition": "eq",
+              "keyValue": "={{ $(\"Webhook GET course\").item.json.query.course_id }}"
+            }
+          ]
+        },
+        "returnAll": true
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "c0821835-e2e7-4451-9bc4-01076d1e253b",
+      "name": "Assemble Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1344,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const courseRaw = $('Find Course').all().map(i => i.json).filter(r => r && r.course_id);\nconst modulesRaw = $('Find Course Modules').all().map(i => i.json).filter(r => r && r.module_id);\nconst learningRaw = $('Find User Learning').all().map(i => i.json).filter(r => r && r.user_id);\n\nif (courseRaw.length === 0) {\n  return [{ json: { success: false, error: 'course_not_found', course: null } }];\n}\n\nconst course = courseRaw[0];\nif (course.is_active === false) {\n  return [{ json: { success: false, error: 'course_inactive', course: null } }];\n}\n\nfunction parseArr(v) {\n  if (v === null || v === undefined || v === '') return [];\n  if (Array.isArray(v)) return v;\n  try { const p = JSON.parse(v); return Array.isArray(p) ? p : []; } catch (e) { return []; }\n}\n\nconst learningByModule = {};\nfor (const ul of learningRaw) {\n  learningByModule[ul.module_id] = ul;\n}\n\nconst modules = modulesRaw\n  .slice()\n  .sort((a, b) => (a.order_index ?? 0) - (b.order_index ?? 0))\n  .map(m => {\n    const ul = learningByModule[m.module_id] || {};\n    return {\n      module_id: m.module_id,\n      course_id: m.course_id ?? course.course_id,\n      order_index: m.order_index ?? 0,\n      title: m.title ?? null,\n      description: m.description ?? null,\n      content: m.content ?? null,\n      skill_name: m.skill_name ?? null,\n      resources: parseArr(m.resources_json),\n      importance_score: m.importance_score ?? 0,\n      market_demand_percent: m.market_demand_percent ?? 0,\n      trend_percent: m.trend_percent ?? 0,\n      status: ul.status ?? 'not_started',\n      progress_percent: ul.progress_percent ?? 0,\n      started_at: ul.started_at ?? null,\n      completed_at: ul.completed_at ?? null,\n      score: ul.score ?? null,\n    };\n  });\n\nconst total_modules = modules.length;\nconst completed_modules = modules.filter(m => (m.progress_percent ?? 0) >= 100).length;\nconst progress_percent = total_modules > 0\n  ? Math.round(modules.reduce((s, m) => s + (m.progress_percent ?? 0), 0) / total_modules)\n  : 0;\n\nlet status = 'not_started';\nif (progress_percent >= 100) status = 'completed';\nelse if (progress_percent > 0) status = 'in_progress';\n\nconst priority_score = learningRaw.reduce((max, ul) => Math.max(max, ul.priority_score ?? 0), 0);\n\nreturn [{ json: { success: true, course: {\n  course_id: course.course_id,\n  name: course.name ?? null,\n  description: course.description ?? null,\n  role: course.role ?? null,\n  version: course.version ?? null,\n  jobs_analyzed: course.jobs_analyzed ?? null,\n  skills_snapshot: parseArr(course.skills_snapshot_json),\n  generated_at: course.generated_at ?? null,\n  updated_at: course.updated_at ?? null,\n  status,\n  progress_percent,\n  completed_modules,\n  total_modules,\n  priority_score,\n  modules,\n} } }];"
+      }
+    },
+    {
+      "id": "0a7e96d1-e829-418b-a42e-5abe01112087",
+      "name": "Respond Course",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1568,
+        0
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseCode": 200
+        }
+      }
+    },
+    {
+      "id": "24aa9f62-cbb2-4f6d-81fa-45d00f32de53",
+      "name": "Respond No User",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        672,
+        192
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\"success\":false,\"error\":\"user_not_found\",\"course\":null}",
+        "options": {
+          "responseCode": 200
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook GET course": {
+      "main": [
+        [
+          {
+            "node": "Find User",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find User": {
+      "main": [
+        [
+          {
+            "node": "User Exists",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "User Exists": {
+      "main": [
+        [
+          {
+            "node": "Find Course",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond No User",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Course": {
+      "main": [
+        [
+          {
+            "node": "Find Course Modules",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Course Modules": {
+      "main": [
+        [
+          {
+            "node": "Find User Learning",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find User Learning": {
+      "main": [
+        [
+          {
+            "node": "Assemble Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Assemble Response": {
+      "main": [
+        [
+          {
+            "node": "Respond Course",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}

@@ -1,0 +1,584 @@
+{
+  "name": "POST_COURSE_PROGRESS",
+  "nodes": [
+    {
+      "id": "e2412f1e-f752-45e8-ab03-1289becc09b0",
+      "name": "Webhook POST course-progress",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        288
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "course-progress",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "webhookId": "580bb0b0-6f28-4542-807c-8f540e983261"
+    },
+    {
+      "id": "e87def3a-e20c-4b5d-89cb-048e03b7c15b",
+      "name": "Find User",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        224,
+        288
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "users",
+          "cachedResultName": "users"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "auth_user_id",
+              "condition": "eq",
+              "keyValue": "={{ $json.body.auth_user_id }}"
+            }
+          ]
+        },
+        "returnAll": false,
+        "limit": 1
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "a159a2ef-a1fa-4e4e-8c4f-9eb77faff687",
+      "name": "User Exists",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        448,
+        288
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "user-exists-cond",
+              "leftValue": "={{ ($json.id ?? \"\").toString() }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "46b42996-7ea2-4ee4-a000-d9d5b8a02135",
+      "name": "Build Progress",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        192
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const body = $('Webhook POST course-progress').first().json.body || {};\nconst userId = ($('Find User').first().json.id ?? '').toString();\n\nconst courseId = (body.course_id ?? '').toString();\nconst moduleId = (body.module_id ?? '').toString();\n\n// Clamp progress into 0..100 when provided\nlet progress = body.progress_percent;\nif (progress !== undefined && progress !== null && progress !== '') {\n  progress = Number(progress);\n  if (Number.isNaN(progress)) progress = null;\n  else progress = Math.max(0, Math.min(100, progress));\n} else {\n  progress = null;\n}\n\nlet score = body.score;\nif (score !== undefined && score !== null && score !== '') {\n  score = Number(score);\n  if (Number.isNaN(score)) score = null;\n} else {\n  score = null;\n}\n\n// Explicit status wins; otherwise derive from progress\nlet status = body.status ? body.status.toString() : null;\nif (!status && progress !== null) {\n  if (progress >= 100) status = 'completed';\n  else if (progress > 0) status = 'in_progress';\n  else status = 'not_started';\n}\n\nconst nowIso = new Date().toISOString();\n\nreturn [{ json: {\n  user_id: userId,\n  course_id: courseId,\n  module_id: moduleId,\n  valid: !!(userId && courseId && moduleId),\n  progress_percent: progress,\n  score: score,\n  status: status,\n  now: nowIso,\n} }];"
+      }
+    },
+    {
+      "id": "0ae9e81f-4bd6-4405-b165-455c93daf3ff",
+      "name": "Input Valid",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        896,
+        192
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "valid-cond",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "f6b54ae2-58f4-443e-ad52-e99847bc1a69",
+      "name": "Find Learning",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1120,
+        96
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "user_learning",
+          "cachedResultName": "user_learning"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "user_id",
+              "condition": "eq",
+              "keyValue": "={{ $json.user_id }}"
+            },
+            {
+              "keyName": "course_id",
+              "condition": "eq",
+              "keyValue": "={{ $json.course_id }}"
+            },
+            {
+              "keyName": "module_id",
+              "condition": "eq",
+              "keyValue": "={{ $json.module_id }}"
+            }
+          ]
+        },
+        "returnAll": false,
+        "limit": 1
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "d74f589e-5e1a-4084-aaaa-9c2db3fa0b42",
+      "name": "Learning Exists",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1344,
+        96
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "learning-exists-cond",
+              "leftValue": "={{ ($json.id ?? \"\").toString() }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "cd6ae1ba-5cb5-4c87-8011-30d168ccf862",
+      "name": "Update Learning",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1568,
+        0
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "user_learning",
+          "cachedResultName": "user_learning"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "id",
+              "condition": "eq",
+              "keyValue": "={{ $json.id }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "status": "={{ $(\"Build Progress\").item.json.status ?? $json.status }}",
+            "progress_percent": "={{ $(\"Build Progress\").item.json.progress_percent ?? $json.progress_percent }}",
+            "score": "={{ $(\"Build Progress\").item.json.score ?? $json.score }}",
+            "started_at": "={{ ($json.started_at ?? \"\") !== \"\" ? $json.started_at : (($(\"Build Progress\").item.json.progress_percent ?? 0) > 0 ? $(\"Build Progress\").item.json.now : $json.started_at) }}",
+            "completed_at": "={{ ($(\"Build Progress\").item.json.progress_percent ?? 0) >= 100 ? $(\"Build Progress\").item.json.now : $json.completed_at }}",
+            "updated_at": "={{ $(\"Build Progress\").item.json.now }}"
+          },
+          "schema": [
+            {
+              "id": "status",
+              "displayName": "status",
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "progress_percent",
+              "displayName": "progress_percent",
+              "type": "number",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "score",
+              "displayName": "score",
+              "type": "number",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "started_at",
+              "displayName": "started_at",
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "completed_at",
+              "displayName": "completed_at",
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "updated_at",
+              "displayName": "updated_at",
+              "type": "string",
+              "canBeUsedToMatch": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "529cccb3-8727-4f1b-94d8-4067a9ae7db9",
+      "name": "Respond Updated",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1792,
+        0
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"success\": true, \"action\": \"updated\", \"learning\": $json } }}",
+        "options": {
+          "responseCode": 200
+        }
+      }
+    },
+    {
+      "id": "75558b1e-4866-4b2c-a9ca-99aeb49d1a15",
+      "name": "Insert Learning",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1568,
+        192
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "insert",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "user_learning",
+          "cachedResultName": "user_learning"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "learning_id": "={{ \"learn_\" + $(\"Build Progress\").item.json.user_id + \"_\" + $(\"Build Progress\").item.json.module_id }}",
+            "user_id": "={{ $(\"Build Progress\").item.json.user_id }}",
+            "course_id": "={{ $(\"Build Progress\").item.json.course_id }}",
+            "module_id": "={{ $(\"Build Progress\").item.json.module_id }}",
+            "status": "={{ $(\"Build Progress\").item.json.status ?? \"not_started\" }}",
+            "progress_percent": "={{ $(\"Build Progress\").item.json.progress_percent ?? 0 }}",
+            "score": "={{ $(\"Build Progress\").item.json.score }}",
+            "started_at": "={{ ($(\"Build Progress\").item.json.progress_percent ?? 0) > 0 ? $(\"Build Progress\").item.json.now : null }}",
+            "completed_at": "={{ ($(\"Build Progress\").item.json.progress_percent ?? 0) >= 100 ? $(\"Build Progress\").item.json.now : null }}",
+            "updated_at": "={{ $(\"Build Progress\").item.json.now }}"
+          },
+          "schema": [
+            {
+              "id": "learning_id",
+              "displayName": "learning_id",
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "user_id",
+              "displayName": "user_id",
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "course_id",
+              "displayName": "course_id",
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "module_id",
+              "displayName": "module_id",
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "progress_percent",
+              "displayName": "progress_percent",
+              "type": "number",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "score",
+              "displayName": "score",
+              "type": "number",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "started_at",
+              "displayName": "started_at",
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "completed_at",
+              "displayName": "completed_at",
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "updated_at",
+              "displayName": "updated_at",
+              "type": "string",
+              "canBeUsedToMatch": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "1ad9e32f-a48c-4997-9ae3-7628796122c3",
+      "name": "Respond Created",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1792,
+        192
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"success\": true, \"action\": \"created\", \"learning\": $json } }}",
+        "options": {
+          "responseCode": 200
+        }
+      }
+    },
+    {
+      "id": "6a4a14d5-cbf8-4f58-94d2-49e2ed002358",
+      "name": "Respond Invalid",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1120,
+        288
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\"success\":false,\"error\":\"missing_required_fields\"}",
+        "options": {
+          "responseCode": 400
+        }
+      }
+    },
+    {
+      "id": "31b0ec04-47d7-4f59-8bf3-de6c090bf7ca",
+      "name": "Respond No User",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        672,
+        384
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\"success\":false,\"error\":\"user_not_found\"}",
+        "options": {
+          "responseCode": 404
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook POST course-progress": {
+      "main": [
+        [
+          {
+            "node": "Find User",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find User": {
+      "main": [
+        [
+          {
+            "node": "User Exists",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "User Exists": {
+      "main": [
+        [
+          {
+            "node": "Build Progress",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond No User",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Progress": {
+      "main": [
+        [
+          {
+            "node": "Input Valid",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Input Valid": {
+      "main": [
+        [
+          {
+            "node": "Find Learning",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Invalid",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Learning": {
+      "main": [
+        [
+          {
+            "node": "Learning Exists",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Learning Exists": {
+      "main": [
+        [
+          {
+            "node": "Update Learning",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Insert Learning",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Learning": {
+      "main": [
+        [
+          {
+            "node": "Respond Updated",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Learning": {
+      "main": [
+        [
+          {
+            "node": "Respond Created",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}

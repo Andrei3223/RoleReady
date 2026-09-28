@@ -1,0 +1,73 @@
+{
+    "title": "Career Agent input",
+    "type": "object",
+    "schemaVersion": 1,
+    "properties": {
+        "cv": {
+            "title": "Your CV (PDF)",
+            "type": "string",
+            "editor": "fileupload",
+            "description": "Upload your CV as a PDF, or paste a public URL to a PDF. Needed on the first run. On later runs you can leave it empty: the agent remembers your profile and only looks for new vacancies."
+        },
+        "position": {
+            "title": "Target position",
+            "type": "string",
+            "editor": "textfield",
+            "description": "The role you are looking for, e.g. \"Data Scientist\" or \"Electronics Engineer\".",
+            "prefill": "Data Scientist"
+        },
+        "city": {
+            "title": "City",
+            "type": "string",
+            "editor": "textfield",
+            "description": "Where you want to work, e.g. \"Amsterdam\". The search is tuned for the Netherlands.",
+            "prefill": "Amsterdam"
+        },
+        "email": {
+            "title": "Your email (optional)",
+            "type": "string",
+            "editor": "textfield",
+            "description": "Used only in the signature of the drafted referral messages. Nothing is ever sent on your behalf."
+        },
+        "waitFor": {
+            "title": "What to wait for",
+            "type": "string",
+            "editor": "select",
+            "description": "How long the run waits. \"Vacancies\" returns in about 5 minutes; \"Everything\" waits for interview-prep plans, referral drafts and the learning course (about 20-40 minutes for 10 vacancies). Work that is still running continues in the background: run the Actor again later with \"Start a new search\" off to collect it.",
+            "enum": ["jobs", "prep", "referrals", "everything"],
+            "enumTitles": ["Vacancies only", "Vacancies + interview prep", "Vacancies + referral contacts", "Everything (prep, referrals, course)"],
+            "default": "everything"
+        },
+        "maxWaitMinutes": {
+            "title": "Maximum wait (minutes)",
+            "type": "integer",
+            "description": "The run stops waiting after this many minutes and returns what is ready.",
+            "minimum": 3,
+            "maximum": 110,
+            "default": 55
+        },
+        "startPipeline": {
+            "title": "Start a new search",
+            "type": "boolean",
+            "description": "On: upload the CV (if given) and start a new vacancy search. Off: only collect results from earlier runs.",
+            "default": true,
+            "sectionCaption": "Advanced"
+        },
+        "authUserId": {
+            "title": "Existing Career Agent user id",
+            "type": "string",
+            "editor": "textfield",
+            "isSecret": true,
+            "description": "Only if you already use the Career Agent web app: paste your user id to work on the same profile. Leave empty to use the id this Actor created for your Apify account."
+        },
+        "pollIntervalSeconds": {
+            "title": "Poll interval (seconds)",
+            "type": "integer",
+            "description": "How often the agent checks for new results.",
+            "minimum": 10,
+            "maximum": 300,
+            "default": 30
+        }
+    },
+    "required": []
+}

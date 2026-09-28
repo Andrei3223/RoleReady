@@ -1,0 +1,1948 @@
+{
+  "name": "get_materials",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        -450
+      ],
+      "id": "fa723866-a2ae-4a74-b34f-a1b0a3fdb27d",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "id": "5324cf1b-b07a-49c5-97ec-b28d98f204cb",
+      "name": "Analyze job",
+      "type": "@n8n/n8n-nodes-langchain.anthropic",
+      "typeVersion": 1,
+      "position": [
+        896,
+        100
+      ],
+      "parameters": {
+        "messages": {
+          "values": [
+            {
+              "content": "=JOB\nTitle: {{ $json.job.title }}\nCompany: {{ $json.job.companyName }}\nLocation: {{ $json.job.location }}\nLinkedIn level: {{ $json.job.experienceLevel }}\n\nDescription:\n{{ $json.job.description }}\n\nCANDIDATE\n{{ JSON.stringify($json.candidate) }}",
+              "role": "user"
+            }
+          ]
+        },
+        "modelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "claude-sonnet-5"
+        },
+        "operation": "message",
+        "options": {
+          "maxTokens": 8000,
+          "system": "You are an interview-preparation analyst for engineering jobs. Analyse the job against the candidate and return ONLY a JSON object (no markdown fences, no text around it) with exactly these keys:\n{\n  \"role_type\": \"software\" | \"hardware\" | \"mixed\",  // software = mostly writing code (embedded, firmware, software); hardware = electronics, physics, process, semiconductor; mixed = both\n  \"role_summary\": string,  // 1-2 sentences\n  \"must_have_skills\": string[],\n  \"nice_to_have_skills\": string[],\n  \"skill_gaps\": [{\"skill\": string, \"why\": string}],  // technical skills or knowledge the job needs that the candidate does not clearly show\n  \"interview_topics\": string[],  // technical topics likely to be tested\n  \"likely_interview_formats\": string[],\n  \"course_queries\": string[],  // max 2 short English search terms (2-4 words) for Coursera that close the biggest technical gaps\n  \"practice_search_queries\": string[],  // max 2 web search queries that find practice interview questions or exercises for this role's technical topics\n  \"leetcode_tags\": string[],  // only for software or mixed roles: up to 3 slugs from [array, string, hash-table, linked-list, bit-manipulation, stack, queue, two-pointers, binary-search, sorting, math, simulation, matrix, dynamic-programming, graph, tree]; otherwise []\n  \"company_search_name\": string,  // company name as it appears on Glassdoor\n  \"interview_search_queries\": string[]  // max 2 web search queries to find real interview experiences for this company and role (Reddit, Glassdoor, blogs)\n}\nRules: Spoken-language requirements (Dutch, German, etc.) are never skill gaps; never suggest learning a spoken language. Be specific to this job and this candidate."
+        },
+        "resource": "text"
+      },
+      "credentials": {
+        "anthropicApi": {
+          "name": "Anthropic account"
+        }
+      }
+    },
+    {
+      "id": "3219850a-8a03-4370-ae9c-08ed5241707b",
+      "name": "When called by pipeline",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        224,
+        -650
+      ],
+      "parameters": {
+        "inputSource": "workflowInputs",
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "auth_user_id",
+              "type": "string"
+            },
+            {
+              "name": "lane",
+              "type": "number"
+            },
+            {
+              "name": "lanes",
+              "type": "number"
+            },
+            {
+              "name": "redo",
+              "type": "boolean"
+            },
+            {
+              "name": "max_jobs",
+              "type": "number"
+            }
+          ]
+        },
+        "notes": "Pipeline: pass only auth_user_id. lane/lanes/redo/max_jobs are set internally when the workflow starts its own parallel workers."
+      },
+      "notes": "Entry point for the main pipeline: pass one item per job with { job, candidate } (settings optional)."
+    },
+    {
+      "id": "1b7b4fe3-2f3a-44ae-8bfe-06944df890f2",
+      "name": "Settings",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// ---- Switch sources on/off to test them separately (saves Apify credits) ----\nconst DEFAULTS = {\n  courses: true,         // Coursera via Apify\n  practice: true,        // Google search via Apify (+ LeetCode for software roles)\n  interviews: true,      // Google search + Glassdoor via Apify\n  plan: true,            // final Claude step that builds the prep plan\n  prep_days: 14,\n  courses_per_query: 4,\n  glassdoor_max_interviews: 30,  // fetched per company; the 10 most relevant are kept\n  leetcode_per_tag: 3\n};\n\nreturn $input.all().map(i => ({\n  json: { ...i.json, settings: { ...DEFAULTS, ...(i.json.settings || {}) } }\n}));",
+        "language": "javaScript",
+        "mode": "runOnceForAllItems"
+      },
+      "notes": "Switch each material source on/off here to test them separately."
+    },
+    {
+      "id": "8d185b48-d060-45bf-ad49-68b825e45780",
+      "name": "Loop jobs",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        672,
+        0
+      ],
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "notes": "One job at a time (Apify allows 5 concurrent runs)."
+    },
+    {
+      "id": "a92fcc35-ac55-4f2e-b019-fe41fba8e40e",
+      "name": "Parse analysis",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        100
+      ],
+      "parameters": {
+        "jsCode": "const res = $json;\nlet text = '';\nif (Array.isArray(res.content)) text = res.content.filter(c => c.type === 'text').map(c => c.text).join('\\n');\nelse text = res.text || res.merged_response || '';\n\nconst match = text.match(/\\{[\\s\\S]*\\}/);\nlet analysis;\ntry { analysis = JSON.parse(match ? match[0] : text); }\ncatch (e) { throw new Error('Analysis is not valid JSON: ' + text.slice(0, 300)); }\n\nconst src = $('Loop jobs').item.json;  // keeps user_job_row_id, auth_user_id, job, candidate, settings\nreturn { json: { ...src, analysis } };",
+        "language": "javaScript",
+        "mode": "runOnceForEachItem"
+      }
+    },
+    {
+      "id": "356abe94-f997-43da-9779-9a5272ca3b5b",
+      "name": "Return results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        896,
+        -220
+      ],
+      "parameters": {
+        "jsCode": "// Short summary per job for the calling pipeline; the full plan is stored in user_jobs (prep_* columns)\nreturn $input.all().map(i => ({ json: {\n  user_job_row_id: i.json.id ?? i.json.user_job_row_id,\n  job_id: i.json.job_id,\n  prep_status: i.json.prep_status ?? 'not_saved',\n  prep_data_quality: i.json.prep_data_quality\n} }));",
+        "language": "javaScript",
+        "mode": "runOnceForAllItems",
+        "notes": "Summary returned to the main pipeline. Full results are in the user_jobs table."
+      },
+      "notes": "One item per job: the prep materials / plan. This is what the main pipeline receives."
+    },
+    {
+      "id": "0a000925-e473-4063-bd84-c48f499b290d",
+      "name": "Courses on?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1344,
+        100
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.settings.courses }}",
+              "operator": {
+                "operation": "true",
+                "singleValue": true,
+                "type": "boolean"
+              },
+              "rightValue": ""
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          }
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      }
+    },
+    {
+      "id": "de6a8cdd-efd8-4eca-8320-55fd78dff75f",
+      "name": "Build course queries",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1568,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const ctx = $input.first().json;\nlet queries = (ctx.analysis.course_queries || []).filter(Boolean).slice(0, 2);\nif (!queries.length) queries = [ctx.job.title];\nreturn queries.map(q => ({ json: { searchQuery: q, maxItems: ctx.settings.courses_per_query, language: 'english' } }));",
+        "language": "javaScript",
+        "mode": "runOnceForAllItems"
+      }
+    },
+    {
+      "id": "ad201204-c6c4-4a37-81ec-6e4bf4998dd7",
+      "name": "Apify: Coursera",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1792,
+        0
+      ],
+      "parameters": {
+        "authentication": "genericCredentialType",
+        "contentType": "json",
+        "genericAuthType": "httpHeaderAuth",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "method": "POST",
+        "options": {
+          "timeout": 300000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "url": "https://api.apify.com/v2/acts/parseforge~coursera-scraper/run-sync-get-dataset-items"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Apify API (Header Auth)"
+        }
+      },
+      "notes": "Actor parseforge/coursera-scraper, one run per query.",
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true,
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "id": "926ef116-ef9b-4f6f-ada5-b195b13c244f",
+      "name": "Collect courses",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2016,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const ctx = $('Courses on?').first().json;\nconst rows = $input.all().map(i => i.json);\nconst errors = rows.filter(r => r && r.error).map(r => r.error.message || String(r.error));\nconst seen = new Set();\nconst courses = [];\nfor (const c of rows) {\n  if (!c || c.error || !c.name || !c.url || seen.has(c.url)) continue;\n  seen.add(c.url);\n  courses.push({\n    title: c.name,\n    url: c.url,\n    provider: c.partnerName,\n    rating: c.rating,\n    reviews: c.reviewCount,\n    level: c.difficulty,\n    duration: c.duration,\n    skills: (c.skills || []).slice(0, 8)\n  });\n}\nreturn [{ json: { ...ctx, courses, courses_errors: errors } }];",
+        "language": "javaScript",
+        "mode": "runOnceForAllItems"
+      }
+    },
+    {
+      "id": "6bbbd121-92b0-4656-a6b7-c483600ec9da",
+      "name": "Skip courses",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1792,
+        220
+      ],
+      "parameters": {
+        "jsCode": "return [{ json: { ...$input.first().json, courses: [] } }];",
+        "language": "javaScript",
+        "mode": "runOnceForAllItems"
+      }
+    },
+    {
+      "id": "130df796-bc86-4134-8897-b44391113e47",
+      "name": "Practice on?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2240,
+        100
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "p1",
+              "leftValue": "={{ $json.settings.practice }}",
+              "operator": {
+                "operation": "true",
+                "singleValue": true,
+                "type": "boolean"
+              },
+              "rightValue": ""
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          }
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      }
+    },
+    {
+      "id": "d195f4eb-bd56-42c9-b697-1c616a428468",
+      "name": "Build practice search",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2464,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const ctx = $input.first().json;\nlet queries = (ctx.analysis.practice_search_queries || []).filter(Boolean).slice(0, 2);\nif (!queries.length) queries = [`${ctx.job.title} interview questions`];\nreturn [{ json: { queries: queries.join('\\n'), maxPagesPerQuery: 1, languageCode: 'en', mobileResults: false, saveHtml: false, saveHtmlToKeyValueStore: false, includeUnfilteredResults: false } }];",
+        "language": "javaScript",
+        "mode": "runOnceForAllItems"
+      }
+    },
+    {
+      "id": "275c3986-82e3-4812-86d0-80e77cc75721",
+      "name": "Apify: Google (practice)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        2688,
+        0
+      ],
+      "parameters": {
+        "authentication": "genericCredentialType",
+        "contentType": "json",
+        "genericAuthType": "httpHeaderAuth",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "method": "POST",
+        "options": {
+          "timeout": 300000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "url": "https://api.apify.com/v2/acts/apify~google-search-scraper/run-sync-get-dataset-items"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Apify API (Header Auth)"
+        }
+      },
+      "notes": "Actor apify/google-search-scraper, all queries in one run.",
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true,
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "id": "4bd9306c-8a46-4577-abf8-63ee50aa0056",
+      "name": "Collect web practice",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2912,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const ctx = $('Practice on?').first().json;\nconst errors = [];\nconst seen = new Set();\nconst practice_web = [];\nfor (const i of $input.all()) {\n  const page = i.json;\n  if (!page) continue;\n  if (page.error) { errors.push(page.error.message || String(page.error)); continue; }\n  for (const r of (page.organicResults || [])) {\n    if (!r.url || seen.has(r.url)) continue;\n    seen.add(r.url);\n    practice_web.push({ title: r.title, url: r.url, snippet: r.description, query: page.searchQuery ? page.searchQuery.term : undefined });\n  }\n}\nreturn [{ json: { ...ctx, practice_web: practice_web.slice(0, 10), practice_leetcode: [], practice_errors: errors } }];",
+        "language": "javaScript",
+        "mode": "runOnceForAllItems"
+      }
+    },
+    {
+      "id": "b9749efb-b158-4833-ad1c-7cf9d694af70",
+      "name": "LeetCode?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        3136,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "l1",
+              "leftValue": "={{ $json.analysis.role_type !== 'hardware' && ($json.analysis.leetcode_tags || []).length > 0 }}",
+              "operator": {
+                "operation": "true",
+                "singleValue": true,
+                "type": "boolean"
+              },
+              "rightValue": ""
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          }
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "notes": "Only for software / mixed roles with LeetCode tags."
+    },
+    {
+      "id": "85db15ea-cd9f-453e-8bb8-62884f13229f",
+      "name": "Build LeetCode requests",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3360,
+        -120
+      ],
+      "parameters": {
+        "jsCode": "const ctx = $input.first().json;\nconst QUERY = `query questionList($categorySlug: String, $limit: Int, $skip: Int, $filters: QuestionListFilterInput) {\n  questionList(categorySlug: $categorySlug, limit: $limit, skip: $skip, filters: $filters) {\n    totalNum\n    data { title titleSlug difficulty acRate isPaidOnly topicTags { slug } }\n  }\n}`;\nreturn (ctx.analysis.leetcode_tags || []).slice(0, 3).map(tag => ({\n  json: { tag, body: { operationName: 'questionList', query: QUERY, variables: { categorySlug: '', skip: 0, limit: 50, filters: { tags: [tag] } } } }\n}));",
+        "language": "javaScript",
+        "mode": "runOnceForAllItems"
+      }
+    },
+    {
+      "id": "3f6f16fc-acad-4c7f-9c91-39d124062b65",
+      "name": "LeetCode API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        3584,
+        -120
+      ],
+      "parameters": {
+        "contentType": "json",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Referer",
+              "value": "https://leetcode.com/problemset/"
+            },
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0"
+            }
+          ]
+        },
+        "jsonBody": "={{ JSON.stringify($json.body) }}",
+        "method": "POST",
+        "options": {
+          "timeout": 30000
+        },
+        "sendBody": true,
+        "sendHeaders": true,
+        "specifyBody": "json",
+        "specifyHeaders": "keypair",
+        "url": "https://leetcode.com/graphql"
+      },
+      "notes": "Free public LeetCode GraphQL endpoint (no Apify cost).",
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "id": "6577f29a-ff59-4034-8181-9ce4e493c77f",
+      "name": "Add LeetCode",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3808,
+        -120
+      ],
+      "parameters": {
+        "jsCode": "const base = $('Collect web practice').first().json;\nconst requests = $('Build LeetCode requests').all();\nconst perTag = base.settings.leetcode_per_tag || 3;\nconst out = [];\nconst errors = [];\nconst seen = new Set();\n$input.all().forEach((item, idx) => {\n  const r = item.json;\n  const tag = requests[idx] ? requests[idx].json.tag : undefined;\n  if (!r || r.error || r.errors) { errors.push((r && r.error && r.error.message) || JSON.stringify(r && r.errors).slice(0, 200)); return; }\n  // LeetCode returns problems in problem-number order: low numbers are the classic, most-discussed ones\n  const list = ((r.data && r.data.questionList && r.data.questionList.data) || []).filter(q => !q.isPaidOnly && !seen.has(q.titleSlug));\n  const easy = list.filter(q => q.difficulty === 'Easy');\n  const medium = list.filter(q => q.difficulty === 'Medium');\n  const picks = [...easy.slice(0, 1), ...medium.slice(0, perTag - 1)];\n  for (const q of picks) {\n    seen.add(q.titleSlug);\n    out.push({ title: q.title, url: `https://leetcode.com/problems/${q.titleSlug}/`, difficulty: q.difficulty, tag });\n  }\n});\nreturn [{ json: { ...base, practice_leetcode: out, practice_leetcode_errors: errors } }];",
+        "language": "javaScript",
+        "mode": "runOnceForAllItems"
+      }
+    },
+    {
+      "id": "26a6166a-ffb6-409f-a3ac-71049228c236",
+      "name": "Skip practice",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2464,
+        220
+      ],
+      "parameters": {
+        "jsCode": "return [{ json: { ...$input.first().json, practice_web: [], practice_leetcode: [] } }];",
+        "language": "javaScript",
+        "mode": "runOnceForAllItems"
+      }
+    },
+    {
+      "id": "1bfdf2bb-e0c6-4733-83b8-4fa6aa9c797f",
+      "name": "Interviews on?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        4032,
+        100
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "i1",
+              "leftValue": "={{ $json.settings.interviews }}",
+              "operator": {
+                "operation": "true",
+                "singleValue": true,
+                "type": "boolean"
+              },
+              "rightValue": ""
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          }
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      }
+    },
+    {
+      "id": "23854205-abff-4c90-a2e1-d9815f8bc06f",
+      "name": "Apify: Glassdoor",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        4928,
+        0
+      ],
+      "parameters": {
+        "authentication": "genericCredentialType",
+        "contentType": "json",
+        "genericAuthType": "httpHeaderAuth",
+        "jsonBody": "={{ JSON.stringify(Object.assign({ maxInterviewsPerCompany: $json.settings.glassdoor_max_interviews, sort: 'relevance', includeQuestions: true, includeCompanyResponses: false, emitInputStatus: false }, $json.glassdoor_url ? { startUrls: [{ url: $json.glassdoor_url }] } : { companyNames: [$json.analysis.company_search_name || $json.job.companyName] })) }}",
+        "method": "POST",
+        "options": {
+          "timeout": 300000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "url": "https://api.apify.com/v2/acts/scrapifier~glassdoor-interviews-universal-scraper/run-sync-get-dataset-items"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Apify API (Header Auth)"
+        }
+      },
+      "notes": "Actor scrapifier/glassdoor-interviews-universal-scraper, by company name.",
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true,
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "id": "9bc3151d-bc66-4c5c-8897-18a7c298045e",
+      "name": "Collect Glassdoor",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5152,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const base = $('Collect web interviews').first().json;\nconst all = $input.all().map(i => i.json).filter(r => r && Object.keys(r).length);\nconst errors = all.filter(r => r.error).map(r => r.error.message || String(r.error));\nconst rows = all.filter(r => !r.error && r.interviewId);\n\n// Rank reports: similar job title and same region first\nconst words = s => String(s || '').toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length > 2);\nconst roleWords = base.analysis.role_type === 'software'\n  ? ['software', 'firmware', 'embedded', 'engineer', 'developer']\n  : ['engineer', 'electrical', 'electronics', 'hardware', 'process', 'research', 'researcher', 'scientist'];\nconst target = new Set([...words(base.job.title), ...roleWords]);\nconst place = new Set(words(base.job.location));\nconst score = r => {\n  let s = 0;\n  for (const w of words(r.jobTitle)) if (target.has(w)) s += 2;\n  for (const w of words(r.location)) if (place.has(w)) s += 1;\n  if ((r.questions || []).length) s += 1;\n  return s;\n};\nconst interviews_glassdoor = rows\n  .map(r => ({ r, s: score(r) }))\n  .sort((a, b) => b.s - a.s || String(b.r.reviewDateTime).localeCompare(String(a.r.reviewDateTime)))\n  .slice(0, 10)\n  .map(({ r, s }) => ({\n    job_title: r.jobTitle,\n    location: r.location,\n    date: String(r.reviewDateTime || '').slice(0, 10),\n    difficulty: r.difficulty,\n    outcome: r.outcome,\n    process: String(r.processDescription || '').slice(0, 800),\n    advice: r.advice,\n    questions: (r.questions || []).map(q => (q && q.question) || q).slice(0, 5),\n    url: r.url,\n    relevance: s\n  }));\nreturn [{ json: { ...base, interviews_glassdoor, glassdoor_errors: errors } }];",
+        "language": "javaScript",
+        "mode": "runOnceForAllItems"
+      }
+    },
+    {
+      "id": "ae5097a5-38f6-4dc1-95d1-16058e22a238",
+      "name": "Build interview search",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4256,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const ctx = $input.first().json;\nconst company = ctx.analysis.company_search_name || ctx.job.companyName;\nlet queries = (ctx.analysis.interview_search_queries || []).filter(Boolean).slice(0, 2);\nif (!queries.length) queries = [`${company} ${ctx.job.title} interview experience`];\n// extra query to find the company's own Glassdoor page (used to pick the right company on Glassdoor)\nqueries.push(`site:glassdoor.com \"${company}\" interview questions`);\nreturn [{ json: { queries: queries.join('\\n'), maxPagesPerQuery: 1, languageCode: 'en', mobileResults: false, saveHtml: false, saveHtmlToKeyValueStore: false, includeUnfilteredResults: false } }];",
+        "language": "javaScript",
+        "mode": "runOnceForAllItems"
+      }
+    },
+    {
+      "id": "39178c26-263a-4d4d-bcb5-4800b7129552",
+      "name": "Apify: Google (interviews)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        4480,
+        0
+      ],
+      "parameters": {
+        "authentication": "genericCredentialType",
+        "contentType": "json",
+        "genericAuthType": "httpHeaderAuth",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "method": "POST",
+        "options": {
+          "timeout": 300000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "url": "https://api.apify.com/v2/acts/apify~google-search-scraper/run-sync-get-dataset-items"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Apify API (Header Auth)"
+        }
+      },
+      "notes": "Actor apify/google-search-scraper for interview experiences (Reddit, blogs).",
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true,
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "id": "7b0f79d0-7582-4b3e-9d59-e714d18307c5",
+      "name": "Collect web interviews",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4704,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const ctx = $('Interviews on?').first().json;\nconst company = (ctx.analysis.company_search_name || ctx.job.companyName).toLowerCase();\nconst errors = [];\nconst seen = new Set();\nconst interviews_web = [];\nconst gdIds = {};\nfor (const i of $input.all()) {\n  const page = i.json;\n  if (!page) continue;\n  if (page.error) { errors.push(page.error.message || String(page.error)); continue; }\n  for (const r of (page.organicResults || [])) {\n    if (!r.url || seen.has(r.url)) continue;\n    seen.add(r.url);\n    // Glassdoor employer id from URLs like ...-E773880.htm or ...EI_IE773880...\n    const m = r.url.match(/glassdoor\\.[a-z.]+\\/.*?(?:EI_IE|-E)(\\d+)/i);\n    if (m && String(r.title || '').toLowerCase().includes(company.split(' ')[0])) gdIds[m[1]] = (gdIds[m[1]] || 0) + 1;\n    interviews_web.push({ title: r.title, url: r.url, snippet: r.description });\n  }\n}\nconst bestId = Object.keys(gdIds).sort((a, b) => gdIds[b] - gdIds[a])[0];\nconst glassdoor_url = bestId ? `https://www.glassdoor.com/Interview/Company-Interview-Questions-E${bestId}.htm` : null;\nreturn [{ json: { ...ctx, interviews_web: interviews_web.slice(0, 8), interviews_web_errors: errors, glassdoor_url } }];",
+        "language": "javaScript",
+        "mode": "runOnceForAllItems"
+      }
+    },
+    {
+      "id": "0656fa6b-890b-451c-b09d-2748181d377a",
+      "name": "Skip interviews",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4256,
+        220
+      ],
+      "parameters": {
+        "jsCode": "return [{ json: { ...$input.first().json, interviews_glassdoor: [], interviews_web: [] } }];",
+        "language": "javaScript",
+        "mode": "runOnceForAllItems"
+      }
+    },
+    {
+      "id": "aac2a4ab-6c2b-4ca8-88d2-354045266580",
+      "name": "Plan on?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        5376,
+        100
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "pl1",
+              "leftValue": "={{ $json.settings.plan }}",
+              "operator": {
+                "operation": "true",
+                "singleValue": true,
+                "type": "boolean"
+              },
+              "rightValue": ""
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          }
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      }
+    },
+    {
+      "id": "b638e69a-e99c-4930-9b8f-2047b5682d6b",
+      "name": "Prepare plan input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5600,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const ctx = $input.first().json;\nconst trim = (s, n) => String(s || '').slice(0, n);\nconst materials = {\n  courses: (ctx.courses || []).slice(0, 8),\n  practice_web: (ctx.practice_web || []).slice(0, 8).map(p => ({ title: p.title, url: p.url, snippet: trim(p.snippet, 200) })),\n  practice_leetcode: ctx.practice_leetcode || [],\n  interviews_glassdoor: (ctx.interviews_glassdoor || []).slice(0, 10),\n  interviews_web: (ctx.interviews_web || []).slice(0, 8).map(p => ({ title: p.title, url: p.url, snippet: trim(p.snippet, 300) }))\n};\nconst prompt = `PREP DAYS: ${ctx.settings.prep_days}\n\nJOB\nTitle: ${ctx.job.title}\nCompany: ${ctx.job.companyName}\nLocation: ${ctx.job.location}\nDescription: ${trim(ctx.job.description, 5000)}\n\nCANDIDATE\n${JSON.stringify(ctx.candidate)}\n\nJOB ANALYSIS\n${JSON.stringify(ctx.analysis)}\n\nRETRIEVED MATERIALS (only use these URLs)\n${JSON.stringify(materials)}`;\nreturn [{ json: { prompt, ctx } }];",
+        "language": "javaScript",
+        "mode": "runOnceForAllItems"
+      }
+    },
+    {
+      "id": "08e6e52d-29a2-4083-9733-9f9d57cdd0c7",
+      "name": "Build plan",
+      "type": "@n8n/n8n-nodes-langchain.anthropic",
+      "typeVersion": 1,
+      "position": [
+        5824,
+        0
+      ],
+      "parameters": {
+        "messages": {
+          "values": [
+            {
+              "content": "={{ $json.prompt }}",
+              "role": "user"
+            }
+          ]
+        },
+        "modelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "claude-sonnet-5"
+        },
+        "operation": "message",
+        "options": {
+          "maxTokens": 16000,
+          "system": "You are an interview coach for early-career engineers. Build a practical interview-preparation plan for one job from the job, the candidate profile, the job analysis and the retrieved materials. Write everything in English, even if some source material is in another language.\nRules:\n- Only use URLs that appear in the retrieved materials. Never invent links. If a category has no suitable materials, return an empty list for it.\n- Select only materials that are relevant to this job; skip irrelevant search results and Glassdoor reports about unrelated roles.\n- Never recommend learning or practising a spoken language (Dutch, German, etc.).\n- Base interview insights only on the Glassdoor / web materials. If there are none that fit, set data_quality to \"role-based only\".\n- The plan must have exactly PREP DAYS entries (one per day), assume 2-3 hours per day, and end with a mock-interview day.\nReturn ONLY a JSON object (no markdown fences, no text around it) with these keys:\n{\n  \"selected_courses\": [{\"title\": string, \"url\": string, \"why\": string}],  // max 3\n  \"selected_practice\": [{\"title\": string, \"url\": string, \"type\": \"leetcode\" | \"article\" | \"question-bank\", \"why\": string}],  // max 6\n  \"interview_insights\": [{\"insight\": string, \"source_url\": string}],  // max 6\n  \"likely_questions\": [{\"question\": string, \"answer_hint\": string, \"source\": \"glassdoor\" | \"web\" | \"role-based\"}],  // 8-12\n  \"plan\": [{\"day\": number, \"focus\": string, \"tasks\": [string]}],\n  \"data_quality\": \"company-specific\" | \"role-based only\"\n}"
+        },
+        "resource": "text"
+      },
+      "credentials": {
+        "anthropicApi": {
+          "name": "Anthropic account"
+        }
+      }
+    },
+    {
+      "id": "91677891-6d6e-4bfa-b95c-120f25c7fa61",
+      "name": "Format output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6048,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const ctx = $('Prepare plan input').first().json.ctx;\nconst res = $input.first().json;\nconst text = Array.isArray(res.content) ? res.content.filter(c => c.type === 'text').map(c => c.text).join('\\n') : (res.text || '');\nconst m = text.match(/\\{[\\s\\S]*\\}/);\nlet plan;\ntry { plan = JSON.parse(m ? m[0] : text); }\ncatch (e) { throw new Error('Plan is not valid JSON: ' + text.slice(0, 300)); }\n\nconst md = [\n  `# Interview prep: ${ctx.job.title} at ${ctx.job.companyName}`,\n  '', '## Skill gaps', ...(ctx.analysis.skill_gaps || []).map(g => `- ${g.skill}: ${g.why}`),\n  '', '## Courses', ...(plan.selected_courses || []).map(c => `- [${c.title}](${c.url}): ${c.why}`),\n  '', '## Practice', ...(plan.selected_practice || []).map(p => `- [${p.title}](${p.url}) (${p.type}): ${p.why}`),\n  '', '## What the interview looks like', ...(plan.interview_insights || []).map(i => `- ${i.insight} ([source](${i.source_url}))`),\n  '', '## Likely questions', ...(plan.likely_questions || []).map(q => `- ${q.question} (${q.source}). Hint: ${q.answer_hint}`),\n  '', `## ${ctx.settings.prep_days}-day plan`, ...(plan.plan || []).map(d => `- Day ${d.day}, ${d.focus}: ${(d.tasks || []).join('; ')}`)\n].join('\\n');\n\nreturn [{ json: {\n  user_job_row_id: ctx.user_job_row_id,\n  auth_user_id: ctx.auth_user_id,\n  job_id: ctx.job.id,\n  job_title: ctx.job.title,\n  company: ctx.job.companyName,\n  job_url: ctx.job.url,\n  role_type: ctx.analysis.role_type,\n  skill_gaps: ctx.analysis.skill_gaps || [],\n  courses: plan.selected_courses || [],\n  practice: plan.selected_practice || [],\n  interview_insights: plan.interview_insights || [],\n  likely_questions: plan.likely_questions || [],\n  plan: plan.plan || [],\n  plan_markdown: md,\n  data_quality: plan.data_quality,\n  materials_found: {\n    courses: (ctx.courses || []).length,\n    practice_web: (ctx.practice_web || []).length,\n    leetcode: (ctx.practice_leetcode || []).length,\n    glassdoor: (ctx.interviews_glassdoor || []).length,\n    interviews_web: (ctx.interviews_web || []).length\n  }\n} }];",
+        "language": "javaScript",
+        "mode": "runOnceForAllItems"
+      }
+    },
+    {
+      "id": "cb936318-7892-4b75-8944-fa41ddbe2292",
+      "name": "Output without plan",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5600,
+        220
+      ],
+      "parameters": {
+        "jsCode": "const ctx = $input.first().json;\nreturn [{ json: {\n  job_id: ctx.job.id,\n  job_title: ctx.job.title,\n  company: ctx.job.companyName,\n  role_type: ctx.analysis.role_type,\n  queries: {\n    courses: ctx.analysis.course_queries,\n    practice: ctx.analysis.practice_search_queries,\n    leetcode_tags: ctx.analysis.leetcode_tags,\n    glassdoor_company: ctx.analysis.company_search_name,\n    interviews: ctx.analysis.interview_search_queries\n  },\n  glassdoor_url: ctx.glassdoor_url,\n  courses: ctx.courses || [],\n  practice_web: ctx.practice_web || [],\n  practice_leetcode: ctx.practice_leetcode || [],\n  interviews_glassdoor: ctx.interviews_glassdoor || [],\n  interviews_web: ctx.interviews_web || [],\n  errors: {\n    courses: ctx.courses_errors,\n    practice: ctx.practice_errors,\n    leetcode: ctx.practice_leetcode_errors,\n    glassdoor: ctx.glassdoor_errors,\n    interviews_web: ctx.interviews_web_errors\n  }\n} }];",
+        "language": "javaScript",
+        "mode": "runOnceForAllItems"
+      },
+      "notes": "Raw materials per job (used when plan = false, e.g. while testing sources)."
+    },
+    {
+      "id": "3aaa7717-12c5-4729-8885-de3b69866775",
+      "name": "Test user",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        -450
+      ],
+      "parameters": {
+        "jsCode": "// Manual test: starts the parallel workers for this user.\n// redo: true rebuilds plans that already exist; max_jobs limits jobs per worker (0 = all).\nreturn [{ json: { auth_user_id: '00000000-0000-0000-0000-000000000000', redo: false, max_jobs: 0 } }];",
+        "language": "javaScript",
+        "mode": "runOnceForAllItems"
+      },
+      "notes": "Manual tests only: the auth_user_id to run for."
+    },
+    {
+      "id": "2bb7b585-b495-495e-98ae-b3c6609ba5b8",
+      "name": "Get user",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        448,
+        -450
+      ],
+      "parameters": {
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "users",
+          "cachedResultName": "users"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "condition": "eq",
+              "keyName": "auth_user_id",
+              "keyValue": "={{ $json.auth_user_id }}"
+            }
+          ]
+        },
+        "limit": 1,
+        "matchType": "allConditions",
+        "operation": "get",
+        "resource": "row",
+        "returnAll": false
+      },
+      "notes": "users table, by auth_user_id"
+    },
+    {
+      "id": "0cc41670-1931-42d7-ad19-8af1241c57c1",
+      "name": "Get user jobs",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        672,
+        -450
+      ],
+      "parameters": {
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "user_jobs",
+          "cachedResultName": "user_jobs"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "condition": "eq",
+              "keyName": "auth_user_id",
+              "keyValue": "={{ $json.auth_user_id }}"
+            }
+          ]
+        },
+        "matchType": "allConditions",
+        "operation": "get",
+        "resource": "row",
+        "returnAll": true
+      },
+      "notes": "user_jobs table: the user's recommended jobs"
+    },
+    {
+      "id": "88cedd16-a596-4935-9989-457ffcb76091",
+      "name": "Pick jobs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        896,
+        -450
+      ],
+      "parameters": {
+        "jsCode": "// This worker's share of the user's recommended jobs (user-vacancy pairs without a prep plan).\nconst cfg = $('When called by pipeline').first().json;\nconst lane = Number(cfg.lane) || 0;\nconst lanes = Number(cfg.lanes) || 1;\nconst REDO = cfg.redo === true;          // rebuild even if prep_status = 'ready'\nconst MAX_JOBS = Number(cfg.max_jobs) || 0; // 0 = no limit\n\nconst seen = new Set();\nconst rows = $input.all().map(i => i.json)\n  .filter(r => r && r.job_id && r.hidden !== true)\n  .filter(r => Number(r.id) % lanes === lane)          // stable split by row id\n  .filter(r => REDO || r.prep_status !== 'ready')\n  .filter(r => !seen.has(r.job_id) && seen.add(r.job_id));\nrows.sort((a, b) => (b.priority_score ?? 0) - (a.priority_score ?? 0) || (b.match_score ?? 0) - (a.match_score ?? 0));\n\nconst picked = MAX_JOBS > 0 ? rows.slice(0, MAX_JOBS) : rows;\nreturn picked.map(r => ({ json: { user_job_row_id: r.id, job_id: r.job_id } }));",
+        "language": "javaScript",
+        "mode": "runOnceForAllItems",
+        "notes": "All recommended jobs (user-vacancy pairs) that don't have a prep plan yet."
+      },
+      "notes": "Top recommended jobs that don't have a prep plan yet."
+    },
+    {
+      "id": "641f55dc-cb55-43f5-b404-4dbff6ae267c",
+      "name": "Get job details",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1120,
+        -450
+      ],
+      "parameters": {
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "jobs",
+          "cachedResultName": "jobs"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "condition": "eq",
+              "keyName": "job_id",
+              "keyValue": "={{ $json.job_id }}"
+            }
+          ]
+        },
+        "limit": 1,
+        "matchType": "allConditions",
+        "operation": "get",
+        "resource": "row",
+        "returnAll": false
+      },
+      "notes": "jobs table, one lookup per picked job"
+    },
+    {
+      "id": "f60dc3af-45cc-43ae-80fb-396772119660",
+      "name": "Build job items",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1344,
+        -450
+      ],
+      "parameters": {
+        "jsCode": "const user = $('Get user').first().json;\nconst cfg = $('When called by pipeline').first().json;\nconst picks = $('Pick jobs').all().map(i => i.json);\nconst jobsById = {};\nfor (const i of $input.all()) if (i.json && i.json.job_id) jobsById[i.json.job_id] = i.json;\n\nconst parse = s => { if (!s) return []; try { return JSON.parse(s); } catch (e) { return [s]; } };\nconst candidate = {\n  name: [user.first_name, user.last_name].filter(Boolean).join(' '),\n  location: [user.location, user.country].filter(Boolean).join(', '),\n  target_roles: parse(user.target_roles_json),\n  summary: user.profile_summary,\n  skills: parse(user.skills_json),\n  experience: parse(user.experience_json),\n  education: parse(user.education_json),\n  previous_companies: parse(user.previous_companies_json),\n  cv_text: String(user.cv_text || '').slice(0, 6000)\n};\n\nconst out = [];\nfor (const p of picks) {\n  const j = jobsById[p.job_id];\n  if (!j) continue;\n  out.push({ json: {\n    user_job_row_id: p.user_job_row_id,\n    auth_user_id: user.auth_user_id,\n    job: {\n      id: j.job_id,\n      title: j.title,\n      companyName: j.company_name,\n      companyUrl: j.company_url,\n      location: j.location,\n      url: j.job_url,\n      experienceLevel: j.seniority,\n      description: j.description\n    },\n    candidate,\n    settings: { redo: cfg.redo === true }\n  } });\n}\nreturn out;",
+        "language": "javaScript",
+        "mode": "runOnceForAllItems"
+      },
+      "notes": "One item per job: { user_job_row_id, job, candidate } in the format the rest of the workflow expects."
+    },
+    {
+      "id": "7be1f418-9104-4fdc-8499-ede7f294d17b",
+      "name": "Save to user_jobs",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        6720,
+        -100
+      ],
+      "parameters": {
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [],
+          "schema": [
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "prep_status",
+              "id": "prep_status",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "prep_role_type",
+              "id": "prep_role_type",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "prep_skill_gaps_json",
+              "id": "prep_skill_gaps_json",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "prep_courses_json",
+              "id": "prep_courses_json",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "prep_practice_json",
+              "id": "prep_practice_json",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "prep_interview_insights_json",
+              "id": "prep_interview_insights_json",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "prep_likely_questions_json",
+              "id": "prep_likely_questions_json",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "prep_plan_json",
+              "id": "prep_plan_json",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "prep_plan_markdown",
+              "id": "prep_plan_markdown",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "prep_data_quality",
+              "id": "prep_data_quality",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "prep_updated_at",
+              "id": "prep_updated_at",
+              "required": false,
+              "type": "dateTime"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "updated_at",
+              "id": "updated_at",
+              "required": false,
+              "type": "dateTime"
+            }
+          ],
+          "value": {
+            "prep_courses_json": "={{ JSON.stringify($('Format output').first().json.courses) }}",
+            "prep_data_quality": "={{ $('Format output').first().json.data_quality }}",
+            "prep_interview_insights_json": "={{ JSON.stringify($('Format output').first().json.interview_insights) }}",
+            "prep_likely_questions_json": "={{ JSON.stringify($('Format output').first().json.likely_questions) }}",
+            "prep_plan_json": "={{ JSON.stringify($('Format output').first().json.plan) }}",
+            "prep_plan_markdown": "={{ $('Format output').first().json.plan_markdown }}",
+            "prep_practice_json": "={{ JSON.stringify($('Format output').first().json.practice) }}",
+            "prep_role_type": "={{ $('Format output').first().json.role_type }}",
+            "prep_skill_gaps_json": "={{ JSON.stringify($('Format output').first().json.skill_gaps) }}",
+            "prep_status": "ready",
+            "prep_updated_at": "={{ $now.toISO() }}",
+            "updated_at": "={{ $now.toISO() }}"
+          }
+        },
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "user_jobs",
+          "cachedResultName": "user_jobs"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "condition": "eq",
+              "keyName": "id",
+              "keyValue": "={{ $json.id }}"
+            }
+          ]
+        },
+        "matchType": "allConditions",
+        "operation": "update",
+        "options": {},
+        "resource": "row"
+      },
+      "notes": "Writes the prep plan into the user's user_jobs row (prep_* columns)."
+    },
+    {
+      "id": "f5ff62bc-1fb7-4a69-96a2-18bdccb0210e",
+      "name": "Find pair in user_jobs",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        6272,
+        0
+      ],
+      "parameters": {
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "user_jobs",
+          "cachedResultName": "user_jobs"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "condition": "eq",
+              "keyName": "auth_user_id",
+              "keyValue": "={{ $json.auth_user_id }}"
+            },
+            {
+              "condition": "eq",
+              "keyName": "job_id",
+              "keyValue": "={{ $json.job_id }}"
+            }
+          ]
+        },
+        "limit": 1,
+        "matchType": "allConditions",
+        "operation": "get",
+        "resource": "row",
+        "returnAll": false
+      },
+      "notes": "Re-checks the user-vacancy pair right before writing.",
+      "alwaysOutputData": true
+    },
+    {
+      "id": "be7c4566-b89b-4dd6-809e-fb36a40012bf",
+      "name": "Pair exists and not done?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        6496,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "pe1",
+              "leftValue": "={{ !!$json.id && ($json.prep_status !== 'ready' || $('Prepare plan input').first().json.ctx.settings.redo === true) }}",
+              "operator": {
+                "operation": "true",
+                "singleValue": true,
+                "type": "boolean"
+              },
+              "rightValue": ""
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          }
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      }
+    },
+    {
+      "id": "c73fac24-ca18-44a0-b6ae-6bbfe8b7ac4c",
+      "name": "Skip save",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6720,
+        220
+      ],
+      "parameters": {
+        "jsCode": "const out = $('Format output').first().json;\nconst row = $input.first().json || {};\nreturn [{ json: {\n  user_job_row_id: row.id ?? out.user_job_row_id,\n  job_id: out.job_id,\n  prep_status: row.id ? 'already_done' : 'pair_not_found',\n  prep_data_quality: row.prep_data_quality\n} }];",
+        "language": "javaScript",
+        "mode": "runOnceForAllItems"
+      },
+      "notes": "Pair missing or already computed: nothing is written."
+    },
+    {
+      "id": "272557d6-e6ae-4691-9adb-7890a27c5097",
+      "name": "Worker call?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        448,
+        -650
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "w1",
+              "leftValue": "={{ $json.lane !== undefined && $json.lane !== null && $json.lane !== '' }}",
+              "operator": {
+                "operation": "true",
+                "singleValue": true,
+                "type": "boolean"
+              },
+              "rightValue": ""
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          }
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "notes": "lane set = this execution is one of the parallel workers"
+    },
+    {
+      "id": "270f7131-928e-4209-bc52-9104095d19e1",
+      "name": "Fan out",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        -850
+      ],
+      "parameters": {
+        "jsCode": "// ---- Number of parallel workers. Apify allows 5 concurrent Actor runs (checked 2026-09-27: maxConcurrentActorJobs = 5).\n// Default 3; the automatic pipeline (Process User) passes lanes = 2 because Referals runs at the same time with 2 workers.\nconst src = $input.first().json;\nconst LANES = Math.max(1, Math.min(3, Number(src.lanes) || 3));\nif (!src.auth_user_id) throw new Error('auth_user_id is required');\nreturn Array.from({ length: LANES }, (_, i) => ({ json: {\n  auth_user_id: src.auth_user_id,\n  lane: i,\n  lanes: LANES,\n  redo: !!src.redo,\n  max_jobs: src.max_jobs || 0\n} }));",
+        "language": "javaScript",
+        "mode": "runOnceForAllItems"
+      },
+      "notes": "Splits the user's jobs over parallel workers."
+    },
+    {
+      "id": "588d1977-4d43-4ce4-b9f4-a5210483a687",
+      "name": "Start workers",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        896,
+        -850
+      ],
+      "parameters": {
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": false
+        },
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "REPLACE_WITH_ID_OF: get_materials",
+          "cachedResultName": "get_materials"
+        },
+        "workflowInputs": {
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false,
+          "mappingMode": "defineBelow",
+          "matchingColumns": [],
+          "schema": [
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "auth_user_id",
+              "id": "auth_user_id",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "lane",
+              "id": "lane",
+              "required": false,
+              "type": "number"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "lanes",
+              "id": "lanes",
+              "required": false,
+              "type": "number"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "redo",
+              "id": "redo",
+              "required": false,
+              "type": "boolean"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "max_jobs",
+              "id": "max_jobs",
+              "required": false,
+              "type": "number"
+            }
+          ],
+          "value": {
+            "auth_user_id": "={{ $json.auth_user_id }}",
+            "lane": "={{ $json.lane }}",
+            "lanes": "={{ $json.lanes }}",
+            "max_jobs": "={{ $json.max_jobs }}",
+            "redo": "={{ $json.redo }}"
+          }
+        }
+      },
+      "notes": "Calls this same workflow once per lane, without waiting (runs in parallel)."
+    },
+    {
+      "id": "d6d9baaa-ad9b-4538-987a-af05ef5cdd71",
+      "name": "Workers started",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        -850
+      ],
+      "parameters": {
+        "jsCode": "const first = $('Fan out').first().json;\nreturn [{ json: {\n  auth_user_id: first.auth_user_id,\n  status: 'started',\n  workers: $('Fan out').all().length,\n  note: 'Prep plans are written to user_jobs (prep_* columns) as each job finishes.'\n} }];",
+        "language": "javaScript",
+        "mode": "runOnceForAllItems"
+      },
+      "notes": "Returned to the caller immediately; results land in user_jobs."
+    },
+    {
+      "id": "645c5cae-149f-46ee-a035-e6ccb29edd44",
+      "name": "Build course when done",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        1120,
+        -220
+      ],
+      "parameters": {
+        "mode": "once",
+        "options": {
+          "waitForSubWorkflow": false
+        },
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "REPLACE_WITH_ID_OF: REFRESH_LEARNING_MATERIALS",
+          "cachedResultName": "REFRESH_LEARNING_MATERIALS"
+        },
+        "workflowInputs": {
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false,
+          "mappingMode": "defineBelow",
+          "matchingColumns": [],
+          "schema": [
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "auth_user_id",
+              "id": "auth_user_id",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "force",
+              "id": "force",
+              "required": false,
+              "type": "boolean"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "search_jobs",
+              "id": "search_jobs",
+              "required": false,
+              "type": "boolean"
+            }
+          ],
+          "value": {
+            "auth_user_id": "={{ $('Get user').first().json.auth_user_id }}",
+            "force": false,
+            "search_jobs": false
+          }
+        }
+      },
+      "notes": "REFRESH_LEARNING_MATERIALS one-user path; it builds the course only if all of the user's jobs have prep plans."
+    }
+  ],
+  "connections": {
+    "Settings": {
+      "main": [
+        [
+          {
+            "node": "Loop jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop jobs": {
+      "main": [
+        [
+          {
+            "node": "Return results",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Analyze job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analyze job": {
+      "main": [
+        [
+          {
+            "node": "Parse analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse analysis": {
+      "main": [
+        [
+          {
+            "node": "Courses on?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Courses on?": {
+      "main": [
+        [
+          {
+            "node": "Build course queries",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Skip courses",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build course queries": {
+      "main": [
+        [
+          {
+            "node": "Apify: Coursera",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Apify: Coursera": {
+      "main": [
+        [
+          {
+            "node": "Collect courses",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect courses": {
+      "main": [
+        [
+          {
+            "node": "Practice on?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Skip courses": {
+      "main": [
+        [
+          {
+            "node": "Practice on?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Practice on?": {
+      "main": [
+        [
+          {
+            "node": "Build practice search",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Skip practice",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build practice search": {
+      "main": [
+        [
+          {
+            "node": "Apify: Google (practice)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Apify: Google (practice)": {
+      "main": [
+        [
+          {
+            "node": "Collect web practice",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect web practice": {
+      "main": [
+        [
+          {
+            "node": "LeetCode?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LeetCode?": {
+      "main": [
+        [
+          {
+            "node": "Build LeetCode requests",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Interviews on?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build LeetCode requests": {
+      "main": [
+        [
+          {
+            "node": "LeetCode API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LeetCode API": {
+      "main": [
+        [
+          {
+            "node": "Add LeetCode",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Add LeetCode": {
+      "main": [
+        [
+          {
+            "node": "Interviews on?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Skip practice": {
+      "main": [
+        [
+          {
+            "node": "Interviews on?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Interviews on?": {
+      "main": [
+        [
+          {
+            "node": "Build interview search",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Skip interviews",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Apify: Glassdoor": {
+      "main": [
+        [
+          {
+            "node": "Collect Glassdoor",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build interview search": {
+      "main": [
+        [
+          {
+            "node": "Apify: Google (interviews)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Apify: Google (interviews)": {
+      "main": [
+        [
+          {
+            "node": "Collect web interviews",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Skip interviews": {
+      "main": [
+        [
+          {
+            "node": "Plan on?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Plan on?": {
+      "main": [
+        [
+          {
+            "node": "Prepare plan input",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Output without plan",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare plan input": {
+      "main": [
+        [
+          {
+            "node": "Build plan",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build plan": {
+      "main": [
+        [
+          {
+            "node": "Format output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Output without plan": {
+      "main": [
+        [
+          {
+            "node": "Loop jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect web interviews": {
+      "main": [
+        [
+          {
+            "node": "Apify: Glassdoor",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect Glassdoor": {
+      "main": [
+        [
+          {
+            "node": "Plan on?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Test user",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get user": {
+      "main": [
+        [
+          {
+            "node": "Get user jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get user jobs": {
+      "main": [
+        [
+          {
+            "node": "Pick jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pick jobs": {
+      "main": [
+        [
+          {
+            "node": "Get job details",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get job details": {
+      "main": [
+        [
+          {
+            "node": "Build job items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build job items": {
+      "main": [
+        [
+          {
+            "node": "Settings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save to user_jobs": {
+      "main": [
+        [
+          {
+            "node": "Loop jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format output": {
+      "main": [
+        [
+          {
+            "node": "Find pair in user_jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find pair in user_jobs": {
+      "main": [
+        [
+          {
+            "node": "Pair exists and not done?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pair exists and not done?": {
+      "main": [
+        [
+          {
+            "node": "Save to user_jobs",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Skip save",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Skip save": {
+      "main": [
+        [
+          {
+            "node": "Loop jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When called by pipeline": {
+      "main": [
+        [
+          {
+            "node": "Worker call?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Worker call?": {
+      "main": [
+        [
+          {
+            "node": "Get user",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Fan out",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Test user": {
+      "main": [
+        [
+          {
+            "node": "Fan out",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fan out": {
+      "main": [
+        [
+          {
+            "node": "Start workers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Start workers": {
+      "main": [
+        [
+          {
+            "node": "Workers started",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Return results": {
+      "main": [
+        [
+          {
+            "node": "Build course when done",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "pinData": {}
+}

@@ -1,0 +1,22 @@
+{
+    "actorSpecification": 1,
+    "name": "career-agent",
+    "title": "Career Agent: Job Search, Interview Prep & Referrals",
+    "description": "Upload your CV and target role. The agent finds matching LinkedIn vacancies, builds a 14-day interview-prep plan per job, finds people at each company who can refer you (alumni, ex-colleagues, same team) with drafted messages, and creates a personal learning course.",
+    "version": "0.1",
+    "buildTag": "latest",
+    "minMemoryMbytes": 256,
+    "maxMemoryMbytes": 1024,
+    "input": "./input_schema.json",
+    "output": "./output_schema.json",
+    "storages": {
+        "dataset": "./dataset_schema.json"
+    },
+    "dockerfile": "./Dockerfile",
+    "environmentVariables": {
+        "OWNER_APIFY_TOKEN": "@ownerApifyToken",
+        "DAILY_PIPELINE_LIMIT": "20",
+        "BUDGET_RESERVE_USD": "10",
+        "N8N_BASE_URL": "https://YOUR-N8N-HOST/webhook"
+    }
+}

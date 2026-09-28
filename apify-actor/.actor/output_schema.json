@@ -1,0 +1,36 @@
+{
+    "actorOutputSchemaVersion": 1,
+    "title": "Career Agent output",
+    "properties": {
+        "vacancies": {
+            "type": "string",
+            "title": "Vacancies",
+            "description": "Matching vacancies with match score and reason, interview-prep status and referral status.",
+            "template": "{{links.apiDefaultDatasetUrl}}/items?view=overview"
+        },
+        "interviewPrep": {
+            "type": "string",
+            "title": "Interview prep",
+            "description": "14-day interview-prep plan per vacancy.",
+            "template": "{{links.apiDefaultDatasetUrl}}/items?view=interview_prep"
+        },
+        "referrals": {
+            "type": "string",
+            "title": "Referral contacts",
+            "description": "People who can refer you, with drafted emails and LinkedIn notes (never sent automatically).",
+            "template": "{{links.apiDefaultDatasetUrl}}/items?view=referrals"
+        },
+        "allData": {
+            "type": "string",
+            "title": "All results (full JSON)",
+            "description": "Every vacancy with its full prep plan and referral contacts.",
+            "template": "{{links.apiDefaultDatasetUrl}}/items"
+        },
+        "course": {
+            "type": "string",
+            "title": "Learning course and summary",
+            "description": "Your personal learning course (modules and resources) and a run summary.",
+            "template": "{{links.apiDefaultKeyValueStoreUrl}}/records/OUTPUT"
+        }
+    }
+}

@@ -1,0 +1,1064 @@
+{
+  "name": "Find Vacancy — Process User",
+  "nodes": [
+    {
+      "id": "7acae40a-89d3-4a9d-8f94-90eae7555bef",
+      "name": "When Called",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "inputSource": "passthrough"
+      }
+    },
+    {
+      "id": "6a558bc6-9902-4f37-bd42-203d16351f62",
+      "name": "Build LinkedIn searches",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const u = $input.first().json;\nfunction arr(v){ if(!v) return []; if(Array.isArray(v)) return v; try{ const p = JSON.parse(v); return Array.isArray(p) ? p : []; }catch(e){ return []; } }\n\nconst roles = arr(u.target_roles_json);\nconst rolesF = roles.length ? roles : ['ML Engineer'];\n// LinkedIn returns nothing for a bare city ('Amsterdam'), so a country is always added.\n// users.country is empty for some users (profile_update does not always set it) -> default Netherlands.\nconst country = (u.country ? String(u.country).trim() : '') || 'Netherlands';\nfunction qualify(loc){\n  const l = String(loc || '').trim();\n  if (!l) return country;\n  return l.toLowerCase().indexOf(country.toLowerCase()) !== -1 ? l : (l + ', ' + country);\n}\nconst locs = arr(u.target_locations_json).map(qualify);\nconst locsF = locs.length ? locs : [country];\n\nconst typeMap = { 'full-time':'F', 'part-time':'P', 'contract':'C', 'temporary':'T', 'internship':'I' };\nlet jt = '';\nif (u.employment_type) { const code = typeMap[String(u.employment_type).toLowerCase()]; if (code) jt = code; }\n\nconst out = [];\nfor (const role of rolesF) {\n  for (const location of locsF) {\n    const urlParam = [{ key: 'distance', value: '25' }];\n    if (jt) urlParam.push({ key: 'f_JT', value: jt });\n    out.push({ json: { keywords: role, location: location, datePosted: 'r2592000', limit: 10, titleExclude: [], urlParam: urlParam } });\n  }\n}\nreturn out;"
+      },
+      "notes": "One LinkedIn search per target role x target location, taken from the user row."
+    },
+    {
+      "id": "d69ad8de-70d4-4ecf-a20a-160df9c7972e",
+      "name": "Apify: LinkedIn Jobs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        448,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.apify.com/v2/acts/valig~linkedin-jobs-scraper/run-sync-get-dataset-items",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 300000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Apify API (Header Auth)"
+        }
+      },
+      "notes": "Runs Actor valig/linkedin-jobs-scraper once per search and returns its dataset items.",
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "id": "91663cb6-15d8-411f-ab64-4f30f0bf1c31",
+      "name": "Collect jobs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const seen = new Set();\nconst out = [];\nfor (const item of $input.all()) {\n  const j = item.json;\n  if (!j || (!j.title && !j.jobTitle && !j.id && !j.jobId && !j.link && !j.url)) continue;\n  const key = j.id || j.jobId || j.link || j.url || (String(j.title || '') + '|' + String(j.companyName || '') + '|' + String(j.location || ''));\n  if (seen.has(key)) continue;\n  seen.add(key);\n  out.push({ json: j });\n}\nreturn out;"
+      },
+      "notes": "All jobs from every search, duplicates removed."
+    },
+    {
+      "id": "951501c8-7af7-4d05-a99b-5f764addd484",
+      "name": "Aggregate for AI",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        896,
+        0
+      ],
+      "parameters": {
+        "jsCode": "function arr(v){ if(!v) return []; if(Array.isArray(v)) return v; try{ const p = JSON.parse(v); return Array.isArray(p) ? p : []; }catch(e){ return []; } }\n\nconst u = $('When Called').first().json;\nconst jobs = $input.all().map(function(it){ return it.json; }).filter(function(j){ return j && (j.title || j.jobTitle || j.id || j.jobId || j.link || j.url); });\n\nconst criteria = {\n  roles: arr(u.target_roles_json),\n  locations: arr(u.target_locations_json),\n  skills: arr(u.skills_json),\n  employment_type: u.employment_type || null,\n  remote_preference: u.remote_preference || null,\n  salary_min: (u.salary_min === undefined ? null : u.salary_min),\n  preferred_industries: arr(u.preferred_industries_json),\n  profile_summary: u.profile_summary || ''\n};\n\nconst slim = jobs.map(function(j, i){\n  return {\n    index: i,\n    title: j.title || j.jobTitle || '',\n    company: j.companyName || j.company || '',\n    location: j.location || '',\n    employment_type: j.employmentType || j.contractType || '',\n    seniority: j.experienceLevel || j.seniorityLevel || '',\n    description: String(j.description || j.descriptionText || '').slice(0, 1200)\n  };\n});\n\nreturn [{ json: { criteria: criteria, jobs: slim } }];"
+      },
+      "notes": "Builds a single payload (candidate criteria + indexed job list) for the AI, dropping empty placeholder items."
+    },
+    {
+      "id": "719336f5-5202-45d4-842d-6bac695adf2a",
+      "name": "AI: score & select jobs",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2.3,
+      "position": [
+        1120,
+        0
+      ],
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "gpt-4o-mini",
+          "cachedResultName": "gpt-4o-mini"
+        },
+        "responses": {
+          "values": [
+            {
+              "content": "={{ JSON.stringify($json) }}"
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {
+          "instructions": "You are a strict job-matching assistant. You receive a JSON object with \"criteria\" (the candidate profile and preferences) and \"jobs\" (an indexed list of vacancies). Select ONLY the jobs that genuinely fit the candidate; exclude weak matches, roles that are too senior, and locations the candidate did not want. For each selected job return: index (the job index from the input), match_score (0-100), priority_score (0-100, how strongly to surface it), company_risk_score (0-100, higher = riskier employer), status (always \"discovered\"), match_reason (1-2 sentences), matched_skills (candidate skills the job needs), missing_skills (skills the job needs the candidate lacks), and required_skills (the key skills the job itself requires). Return nothing but the structured object.",
+          "maxTokens": 3000,
+          "textFormat": {
+            "textOptions": {
+              "type": "json_schema",
+              "name": "job_selection",
+              "schema": "{\"type\":\"object\",\"properties\":{\"jobs\":{\"type\":\"array\",\"items\":{\"type\":\"object\",\"properties\":{\"index\":{\"type\":\"integer\"},\"match_score\":{\"type\":\"integer\"},\"priority_score\":{\"type\":\"integer\"},\"company_risk_score\":{\"type\":\"integer\"},\"status\":{\"type\":\"string\"},\"match_reason\":{\"type\":\"string\"},\"matched_skills\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"missing_skills\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"required_skills\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}}},\"required\":[\"index\",\"match_score\",\"priority_score\",\"company_risk_score\",\"status\",\"match_reason\",\"matched_skills\",\"missing_skills\",\"required_skills\"],\"additionalProperties\":false}}},\"required\":[\"jobs\"],\"additionalProperties\":false}",
+              "strict": true
+            }
+          },
+          "temperature": 0.2
+        }
+      },
+      "credentials": {
+        "openAiApi": {
+          "name": "OpenAI account"
+        }
+      }
+    },
+    {
+      "id": "c218b56f-91c4-4da7-8933-198f60422c5e",
+      "name": "Map results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1344,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const parsed = $input.first().json;\nlet obj = null;\nif (parsed && parsed.output && parsed.output[0] && parsed.output[0].content && parsed.output[0].content[0]) {\n  obj = parsed.output[0].content[0].text;\n}\nif (typeof obj === 'string') { try { obj = JSON.parse(obj); } catch (e) { obj = {}; } }\nif (!obj) obj = {};\nconst selected = Array.isArray(obj.jobs) ? obj.jobs : [];\n\nconst fullJobs = $('Collect jobs').all().map(function(i){ return i.json; });\nconst u = $('When Called').first().json;\nconst nowIso = new Date().toISOString();\nconst userId = (u.id !== undefined && u.id !== null) ? String(u.id) : (u.user_id ? String(u.user_id) : '');\nconst authId = u.auth_user_id || '';\n\nfunction numOrNull(v){ if (v === null || v === undefined || v === '') return null; const n = Number(v); return isFinite(n) ? n : null; }\n\nconst rows = [];\nfor (const s of selected) {\n  const idx = s.index;\n  const full = (idx !== undefined && fullJobs[idx]) ? fullJobs[idx] : null;\n  if (!full) continue;\n\n  const jobUrl = full.link || full.url || full.jobUrl || full.jobPostingUrl || '';\n  const extId = full.id || full.jobId || full.jobPostingId || null;\n  const jobId = extId ? ('linkedin:' + String(extId)) : ('linkedin:' + (jobUrl || (String(full.title || '') + '|' + String(full.companyName || ''))));\n\n  const matched = Array.isArray(s.matched_skills) ? s.matched_skills : [];\n  const missing = Array.isArray(s.missing_skills) ? s.missing_skills : [];\n  const required = Array.isArray(s.required_skills) ? s.required_skills : [];\n  const salMin = numOrNull(full.salaryMin || full.salary_min);\n  const salMax = numOrNull(full.salaryMax || full.salary_max);\n  const title = full.title || full.jobTitle || null;\n  const company = full.companyName || full.company || null;\n  const companyUrl = full.companyUrl || full.companyLinkedinUrl || null;\n  const location = full.location || null;\n  const remoteType = full.workplaceType || full.remoteType || null;\n  const empType = full.employmentType || full.contractType || null;\n  const description = full.description || full.descriptionText || null;\n  const seniority = full.experienceLevel || full.seniorityLevel || null;\n  const publishedAt = full.postedAt || full.publishedAt || full.listedAt || null;\n  const matchScore = numOrNull(s.match_score);\n  const priorityScore = numOrNull(s.priority_score);\n  const riskScore = numOrNull(s.company_risk_score);\n  const status = s.status || 'discovered';\n  const reason = s.match_reason || '';\n\n  rows.push({\n    job_id: jobId, source: 'linkedin', external_job_id: extId ? String(extId) : null, job_key: jobId,\n    title: title, company_name: company, company_url: companyUrl, job_url: jobUrl || null,\n    location: location, remote_type: remoteType, employment_type: empType, description: description,\n    required_skills_json: JSON.stringify(required), preferred_skills_json: null, seniority: seniority,\n    salary_min: salMin, salary_max: salMax, published_at: publishedAt, fetched_at: nowIso,\n    is_active: true, raw_data_json: JSON.stringify(full),\n    user_id: userId, auth_user_id: authId, match_score: matchScore, status: status,\n    match_reason: reason, matched_skills_json: JSON.stringify(matched), missing_skills_json: JSON.stringify(missing),\n    priority_score: priorityScore, company_risk_score: riskScore, saved: false, hidden: false,\n    created_at: nowIso, updated_at: nowIso\n  });\n}\n\nreturn [{ json: { rows: rows, saved_count: rows.length } }];"
+      },
+      "notes": "Joins the AI selection back to full job data and builds table rows for jobs + user_jobs."
+    },
+    {
+      "id": "1a0403b3-ca85-4357-b7fe-25e534eb1bee",
+      "name": "Split Rows",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        2016,
+        0
+      ],
+      "parameters": {
+        "fieldToSplitOut": "rows",
+        "options": {}
+      },
+      "notes": "One item per selected job for saving; emits zero items when nothing was selected."
+    },
+    {
+      "id": "f2f3c527-3ea7-4974-9cdd-ab4d3784a061",
+      "name": "Save Job",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        2240,
+        0
+      ],
+      "parameters": {
+        "operation": "upsert",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "jobs",
+          "cachedResultName": "jobs"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "job_id",
+              "keyValue": "={{ $json.job_id }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "job_id": "={{ $json.job_id }}",
+            "source": "={{ $json.source }}",
+            "external_job_id": "={{ $json.external_job_id }}",
+            "job_key": "={{ $json.job_key }}",
+            "title": "={{ $json.title }}",
+            "company_name": "={{ $json.company_name }}",
+            "company_url": "={{ $json.company_url }}",
+            "job_url": "={{ $json.job_url }}",
+            "location": "={{ $json.location }}",
+            "remote_type": "={{ $json.remote_type }}",
+            "employment_type": "={{ $json.employment_type }}",
+            "description": "={{ $json.description }}",
+            "required_skills_json": "={{ $json.required_skills_json }}",
+            "preferred_skills_json": "={{ $json.preferred_skills_json }}",
+            "seniority": "={{ $json.seniority }}",
+            "salary_min": "={{ $json.salary_min }}",
+            "salary_max": "={{ $json.salary_max }}",
+            "published_at": "={{ $json.published_at }}",
+            "fetched_at": "={{ $json.fetched_at }}",
+            "is_active": "={{ $json.is_active }}",
+            "raw_data_json": "={{ $json.raw_data_json }}"
+          },
+          "matchingColumns": [
+            "job_id"
+          ],
+          "schema": [
+            {
+              "id": "job_id",
+              "displayName": "job_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "source",
+              "displayName": "source",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "external_job_id",
+              "displayName": "external_job_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "job_key",
+              "displayName": "job_key",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "title",
+              "displayName": "title",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "company_name",
+              "displayName": "company_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "company_url",
+              "displayName": "company_url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "job_url",
+              "displayName": "job_url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "location",
+              "displayName": "location",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "remote_type",
+              "displayName": "remote_type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "employment_type",
+              "displayName": "employment_type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "description",
+              "displayName": "description",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "required_skills_json",
+              "displayName": "required_skills_json",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "preferred_skills_json",
+              "displayName": "preferred_skills_json",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "seniority",
+              "displayName": "seniority",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "salary_min",
+              "displayName": "salary_min",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "salary_max",
+              "displayName": "salary_max",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "published_at",
+              "displayName": "published_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "fetched_at",
+              "displayName": "fetched_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "is_active",
+              "displayName": "is_active",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "boolean",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "raw_data_json",
+              "displayName": "raw_data_json",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "72e05675-77a2-4ea8-8513-cc15f018afbd",
+      "name": "Save User Job",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        2464,
+        0
+      ],
+      "parameters": {
+        "operation": "upsert",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "user_jobs",
+          "cachedResultName": "user_jobs"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "user_id",
+              "keyValue": "={{ $('Split Rows').item.json.user_id }}"
+            },
+            {
+              "keyName": "job_id",
+              "keyValue": "={{ $('Split Rows').item.json.job_id }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "user_id": "={{ $('Split Rows').item.json.user_id }}",
+            "auth_user_id": "={{ $('Split Rows').item.json.auth_user_id }}",
+            "job_id": "={{ $('Split Rows').item.json.job_id }}",
+            "match_score": "={{ $('Split Rows').item.json.match_score }}",
+            "status": "={{ $('Split Rows').item.json.status }}",
+            "match_reason": "={{ $('Split Rows').item.json.match_reason }}",
+            "matched_skills_json": "={{ $('Split Rows').item.json.matched_skills_json }}",
+            "missing_skills_json": "={{ $('Split Rows').item.json.missing_skills_json }}",
+            "priority_score": "={{ $('Split Rows').item.json.priority_score }}",
+            "company_risk_score": "={{ $('Split Rows').item.json.company_risk_score }}",
+            "saved": "={{ $('Split Rows').item.json.saved }}",
+            "hidden": "={{ $('Split Rows').item.json.hidden }}",
+            "created_at": "={{ $('Split Rows').item.json.created_at }}",
+            "updated_at": "={{ $('Split Rows').item.json.updated_at }}"
+          },
+          "matchingColumns": [
+            "user_id",
+            "job_id"
+          ],
+          "schema": [
+            {
+              "id": "auth_user_id",
+              "displayName": "auth_user_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "user_job_id",
+              "displayName": "user_job_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "user_id",
+              "displayName": "user_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "job_id",
+              "displayName": "job_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "match_score",
+              "displayName": "match_score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "match_reason",
+              "displayName": "match_reason",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "matched_skills_json",
+              "displayName": "matched_skills_json",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "missing_skills_json",
+              "displayName": "missing_skills_json",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "priority_score",
+              "displayName": "priority_score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "company_risk_score",
+              "displayName": "company_risk_score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "saved",
+              "displayName": "saved",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "boolean",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "hidden",
+              "displayName": "hidden",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "boolean",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "applied_at",
+              "displayName": "applied_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "interview_at",
+              "displayName": "interview_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "created_at",
+              "displayName": "created_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "updated_at",
+              "displayName": "updated_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "296d03dd-d575-4463-a2e8-efa0ff4b4578",
+      "name": "Load existing user jobs",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1568,
+        0
+      ],
+      "parameters": {
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "user_jobs",
+          "cachedResultName": "user_jobs"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "condition": "eq",
+              "keyName": "user_id",
+              "keyValue": "={{ String($('When Called').first().json.id ?? '') }}"
+            }
+          ]
+        },
+        "matchType": "allConditions",
+        "operation": "get",
+        "resource": "row",
+        "returnAll": true
+      },
+      "notes": "The user's current user_jobs rows, to keep saved/hidden/status/created_at.",
+      "alwaysOutputData": true,
+      "executeOnce": true
+    },
+    {
+      "id": "3fd52ffb-1a64-4245-858e-5f8379396923",
+      "name": "Keep user choices",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1792,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// Jobs that are already in user_jobs keep the user's choices: saved, hidden, status and created_at.\n// Only the AI scores / reasons / skills and updated_at are refreshed. applied_at and interview_at are never written here.\nconst rows = ($('Map results').first().json.rows) || [];\nconst existing = {};\nfor (const i of $input.all()) {\n  const r = i.json;\n  if (r && r.job_id) existing[r.job_id] = r;\n}\nconst out = rows.map(r => {\n  const ex = existing[r.job_id];\n  if (!ex) return r;\n  return {\n    ...r,\n    saved: ex.saved === true,\n    hidden: ex.hidden === true,\n    status: ex.status || r.status,\n    created_at: ex.created_at || r.created_at,\n  };\n});\nreturn [{ json: { rows: out, saved_count: out.length, new_count: out.filter(r => !existing[r.job_id]).length } }];",
+        "language": "javaScript",
+        "mode": "runOnceForAllItems"
+      },
+      "notes": "Jobs found again keep what the user did with them; only scores and reasons are refreshed."
+    },
+    {
+      "id": "f6610164-2f2f-4460-b4d2-8e94f229a007",
+      "name": "Prep input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2016,
+        256
+      ],
+      "parameters": {
+        "jsCode": "// One item for the background jobs. Runs after the save branch (n8n runs the upper branch first).\n// Skipped when the pipeline was already started for this user less than 30 minutes ago\n// (get_materials / Referals may still be running; pending work is picked up by the next run).\nconst u = $('When Called').first().json;\nif (!u.auth_user_id || u.id === undefined || u.id === null) return [];\nconst last = u.pipeline_started_at ? new Date(u.pipeline_started_at).getTime() : 0;\nif (last && Date.now() - last < 30 * 60 * 1000) return [];\nreturn [{ json: { auth_user_id: String(u.auth_user_id), user_row_id: u.id } }];",
+        "language": "javaScript",
+        "mode": "runOnceForAllItems"
+      },
+      "notes": "Runs after the save branch above (branches run top to bottom)."
+    },
+    {
+      "id": "7cee348e-b925-4a55-b5cd-bf123ffaa57e",
+      "name": "Start get_materials",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        2464,
+        256
+      ],
+      "parameters": {
+        "mode": "once",
+        "options": {
+          "waitForSubWorkflow": false
+        },
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "REPLACE_WITH_ID_OF: get_materials",
+          "cachedResultName": "get_materials"
+        },
+        "workflowInputs": {
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false,
+          "mappingMode": "defineBelow",
+          "matchingColumns": [],
+          "schema": [
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "auth_user_id",
+              "id": "auth_user_id",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "lanes",
+              "id": "lanes",
+              "required": false,
+              "type": "number"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "redo",
+              "id": "redo",
+              "required": false,
+              "type": "boolean"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "max_jobs",
+              "id": "max_jobs",
+              "required": false,
+              "type": "number"
+            }
+          ],
+          "value": {
+            "auth_user_id": "={{ $('Prep input').first().json.auth_user_id }}",
+            "lanes": 2,
+            "max_jobs": 0,
+            "redo": false
+          }
+        }
+      },
+      "notes": "Interview-prep plans for every job without one (2 parallel lanes). Does not wait."
+    },
+    {
+      "id": "b727db32-c2c7-4806-b540-3a5825fc48aa",
+      "name": "Start Referals",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        2688,
+        256
+      ],
+      "parameters": {
+        "mode": "once",
+        "options": {
+          "waitForSubWorkflow": false
+        },
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "REPLACE_WITH_ID_OF: Referals",
+          "cachedResultName": "Referals"
+        },
+        "workflowInputs": {
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false,
+          "mappingMode": "defineBelow",
+          "matchingColumns": [],
+          "schema": [
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "auth_user_id",
+              "id": "auth_user_id",
+              "required": false,
+              "type": "string"
+            }
+          ],
+          "value": {
+            "auth_user_id": "={{ $('Prep input').first().json.auth_user_id }}"
+          }
+        }
+      },
+      "notes": "Referral contacts + drafts for jobs not yet in referral_drafts (2 workers). Does not wait."
+    },
+    {
+      "id": "5d83710f-651a-493e-a242-ea7b23f732c1",
+      "name": "Mark pipeline started",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        2240,
+        256
+      ],
+      "parameters": {
+        "columns": {
+          "mappingMode": "defineBelow",
+          "schema": [
+            {
+              "canBeUsedToMatch": false,
+              "displayName": "pipeline_started_at",
+              "id": "pipeline_started_at",
+              "type": "dateTime"
+            }
+          ],
+          "value": {
+            "pipeline_started_at": "={{ $now.toISO() }}"
+          }
+        },
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "users",
+          "cachedResultName": "users"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "condition": "eq",
+              "keyName": "id",
+              "keyValue": "={{ $json.user_row_id }}"
+            }
+          ]
+        },
+        "matchType": "allConditions",
+        "operation": "update",
+        "resource": "row"
+      },
+      "notes": "users.pipeline_started_at = now (guards against double starts).",
+      "alwaysOutputData": true
+    }
+  ],
+  "connections": {
+    "When Called": {
+      "main": [
+        [
+          {
+            "node": "Build LinkedIn searches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build LinkedIn searches": {
+      "main": [
+        [
+          {
+            "node": "Apify: LinkedIn Jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Apify: LinkedIn Jobs": {
+      "main": [
+        [
+          {
+            "node": "Collect jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect jobs": {
+      "main": [
+        [
+          {
+            "node": "Aggregate for AI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate for AI": {
+      "main": [
+        [
+          {
+            "node": "AI: score & select jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI: score & select jobs": {
+      "main": [
+        [
+          {
+            "node": "Map results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Rows": {
+      "main": [
+        [
+          {
+            "node": "Save Job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Job": {
+      "main": [
+        [
+          {
+            "node": "Save User Job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Map results": {
+      "main": [
+        [
+          {
+            "node": "Load existing user jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load existing user jobs": {
+      "main": [
+        [
+          {
+            "node": "Keep user choices",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Keep user choices": {
+      "main": [
+        [
+          {
+            "node": "Split Rows",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Prep input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Start get_materials": {
+      "main": [
+        [
+          {
+            "node": "Start Referals",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prep input": {
+      "main": [
+        [
+          {
+            "node": "Mark pipeline started",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark pipeline started": {
+      "main": [
+        [
+          {
+            "node": "Start get_materials",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "pinData": {}
+}

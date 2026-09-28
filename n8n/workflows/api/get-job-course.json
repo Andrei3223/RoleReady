@@ -1,0 +1,133 @@
+{
+  "name": "GET_JOB_COURSE",
+  "nodes": [
+    {
+      "id": "22b43894-761d-4781-a02f-b05e3b8cb229",
+      "name": "Webhook GET job-course",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        96
+      ],
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "job-course",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "webhookId": "9e0e94b7-3199-483c-87fd-94d8d7533ae6"
+    },
+    {
+      "id": "d00aaa1a-aa23-4d05-8d20-ad29e647a85a",
+      "name": "Assemble Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// Returns the course / interview-prep data stored on the user_jobs row for (auth_user_id, job_id).\nconst q = $('Webhook GET job-course').first().json.query || {};\nconst authUserId = String(q.auth_user_id ?? '').trim();\nconst jobId = String(q.job_id ?? '').trim();\n\nif (!authUserId || !jobId) {\n  return [{ json: { success: false, error: !authUserId ? 'missing_auth_user_id' : 'missing_job_id', auth_user_id: authUserId || null, job_id: jobId || null, courses: [] } }];\n}\n\nconst row = $('Find User Job').all().map(i => i.json).find(r => r && r.job_id);\nif (!row) {\n  return [{ json: { success: false, error: 'user_job_not_found', auth_user_id: authUserId, job_id: jobId, courses: [] } }];\n}\n\nfunction parseArr(v) {\n  if (v === null || v === undefined || v === '') return [];\n  if (Array.isArray(v)) return v;\n  try { const p = JSON.parse(v); return Array.isArray(p) ? p : []; } catch (e) { return []; }\n}\n\nreturn [{ json: {\n  success: true,\n  auth_user_id: authUserId,\n  job_id: row.job_id,\n  user_job_id: row.id,\n  status: row.status ?? null,\n  match_score: row.match_score ?? null,\n  priority_score: row.priority_score ?? null,\n  matched_skills: parseArr(row.matched_skills_json),\n  missing_skills: parseArr(row.missing_skills_json),\n  prep_status: row.prep_status || 'not_ready',\n  prep_role_type: row.prep_role_type ?? null,\n  prep_data_quality: row.prep_data_quality ?? null,\n  prep_updated_at: row.prep_updated_at ?? null,\n  courses: parseArr(row.prep_courses_json),\n  skill_gaps: parseArr(row.prep_skill_gaps_json),\n  practice: parseArr(row.prep_practice_json),\n  interview_insights: parseArr(row.prep_interview_insights_json),\n  likely_questions: parseArr(row.prep_likely_questions_json),\n  plan: parseArr(row.prep_plan_json),\n  plan_markdown: row.prep_plan_markdown ?? null,\n} }];\n"
+      }
+    },
+    {
+      "id": "30f79272-77c6-4bd9-9bf9-5ffaca909557",
+      "name": "Respond Job Course",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        672,
+        0
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseCode": 200
+        }
+      }
+    },
+    {
+      "id": "45ddee69-b9bd-43bf-a7c4-6a97e45f0d36",
+      "name": "Find User Job",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        224,
+        0
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "user_jobs",
+          "cachedResultName": "user_jobs"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "auth_user_id",
+              "condition": "eq",
+              "keyValue": "={{ String($json.query.auth_user_id ?? '').trim() }}"
+            },
+            {
+              "keyName": "job_id",
+              "condition": "eq",
+              "keyValue": "={{ String($json.query.job_id ?? '').trim() }}"
+            }
+          ]
+        },
+        "returnAll": false,
+        "limit": 1
+      },
+      "alwaysOutputData": true
+    }
+  ],
+  "connections": {
+    "Assemble Response": {
+      "main": [
+        [
+          {
+            "node": "Respond Job Course",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook GET job-course": {
+      "main": [
+        [
+          {
+            "node": "Find User Job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find User Job": {
+      "main": [
+        [
+          {
+            "node": "Assemble Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}

@@ -1,0 +1,2118 @@
+{
+  "name": "REFRESH_LEARNING_MATERIALS",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 12
+            }
+          ]
+        }
+      },
+      "id": "3c6d1980-5d23-46f2-9bef-0fb3d1d35ae8",
+      "name": "Every 12 hours",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        0,
+        1552
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "users",
+          "cachedResultName": "users"
+        },
+        "returnAll": true
+      },
+      "id": "fefdef37-4033-46fb-bf59-2f1c99e33c26",
+      "name": "Get Users",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        208,
+        1680
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "courses-regenerate",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "88a92ba2-a57f-4134-b12f-e32ed0bc7f1a",
+      "name": "Regenerate (Lovable)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        1712
+      ],
+      "webhookId": "1a6cad00-bd77-42db-87e4-2560930ab9af"
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "user_jobs",
+          "cachedResultName": "user_jobs"
+        },
+        "returnAll": true
+      },
+      "id": "26ccb1a9-0cb7-47fb-aa56-e9e1f1aff8c4",
+      "name": "Get All User Jobs",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        432,
+        1680
+      ],
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// The users table's own user_id column is unused; the canonical internal id is the row id,\n// which is what user_jobs/user_learning reference as user_id (stringified).\nconst users = $('Get Users').all().map(i => i.json)\n  .filter(u => u && (u.id ?? u.user_id) != null)\n  .map(u => ({ ...u, user_id: String(u.id ?? u.user_id) }));\nconst jobs = $('Get All User Jobs').all().map(i => i.json)\n  .filter(r => r && r.user_id != null)\n  .map(r => ({ ...r, user_id: String(r.user_id) }));\n\n// One-user mode (started via \"When called (one user)\"): build only that user's course.\nlet onlyUserId = null;\ntry { const c = $('Course check').first().json; if (c && c.go) onlyUserId = String(c.user_row_id); } catch (e) {}\n\nfunction parseArr(v) { if (v === null || v === undefined || v === '') return []; if (Array.isArray(v)) return v; try { const p = JSON.parse(v); return Array.isArray(p) ? p : []; } catch (e) { return []; } }\nfunction slug(s) { return String(s || '').toLowerCase().trim().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 60); }\n\nconst MAX_SKILLS = 20;\nconst jobsByUser = {};\nfor (const j of jobs) { (jobsByUser[j.user_id] = jobsByUser[j.user_id] || []).push(j); }\n\nconst out = [];\nfor (const u of users) {\n  if (onlyUserId && u.user_id !== onlyUserId) continue;\n  const roles = parseArr(u.target_roles_json).map(r => String(r).trim()).filter(Boolean);\n  if (roles.length === 0) continue;\n  const userJobs = (jobsByUser[u.user_id] || []).filter(j => j.hidden !== true && j.prep_status === 'ready');\n  if (userJobs.length === 0) continue;\n\n  const skillMap = {};      // slug -> { skill, count, rank, whys[], jobIds[] }\n  const courseRes = {};     // url -> { title, url, why }\n  const practiceRes = {};   // url -> { title, url, type }\n  const jobIds = new Set();\n\n  for (const j of userJobs) {\n    jobIds.add(j.job_id);\n    parseArr(j.prep_skill_gaps_json).forEach((g, pos) => {\n      const name = g && (g.skill || g.name);\n      if (!name) return;\n      const k = slug(name);\n      if (!k) return;\n      const e = skillMap[k] || (skillMap[k] = { skill: name, count: 0, rank: pos, whys: [], jobIds: [] });\n      e.count++;\n      e.rank = Math.min(e.rank, pos); // position of this gap in a job's list (0 = that job's top gap)\n      if (g.why) e.whys.push(g.why);\n      e.jobIds.push(j.job_id);\n    });\n    for (const c of parseArr(j.prep_courses_json)) {\n      if (c && c.url && !courseRes[c.url]) courseRes[c.url] = { title: c.title || c.url, url: c.url, why: c.why || '' };\n    }\n    for (const p of parseArr(j.prep_practice_json)) {\n      if (p && p.url && !practiceRes[p.url]) practiceRes[p.url] = { title: p.title || p.url, url: p.url, type: p.type || 'article' };\n    }\n  }\n\n  // Most frequent first; ties broken by per-job rank so every job's top gaps are included before anyone's 3rd/4th gap.\n  const skills = Object.values(skillMap).sort((a, b) => (b.count - a.count) || (a.rank - b.rank)).slice(0, MAX_SKILLS);\n  if (skills.length === 0) continue;\n\n  for (const role of roles) {\n    out.push({ json: {\n      user_id: String(u.user_id),\n      auth_user_id: u.auth_user_id,\n      role: role,\n      // Per-user course: one course per (user, target role). Includes users.id so courses are never shared.\n      course_id: 'course_' + u.user_id + '_' + slug(role),\n      skills: skills.map(s => ({ skill: s.skill, count: s.count, why: (s.whys[0] || ''), job_ids: Array.from(new Set(s.jobIds)) })),\n      course_resources: Object.values(courseRes).slice(0, 25),\n      practice_resources: Object.values(practiceRes).slice(0, 25),\n      job_ids: Array.from(jobIds),\n    } });\n  }\n}\nreturn out;\n"
+      },
+      "id": "2cce5ac8-aca9-4261-bd82-f8671bc35832",
+      "name": "Build Role Aggregates",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        656,
+        1680
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all();"
+      },
+      "id": "20843424-e242-4f81-99cf-b818b2a3bfb1",
+      "name": "Prepare All",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        1680
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $('Prepare All').all().map(i => i.json);\nconst byId = {};\nfor (const it of items) {\n  if (!it.course_id) continue;\n  if (!byId[it.course_id]) {\n    byId[it.course_id] = {\n      course_id: it.course_id,\n      role: it.role,\n      name: it.course_name,\n      description: it.course_description,\n      jobs_analyzed: it.jobs_analyzed || 0,\n      skills_snapshot_json: JSON.stringify(it.skills_snapshot || []),\n      now: it.now,\n    };\n  } else {\n    byId[it.course_id].jobs_analyzed = Math.max(byId[it.course_id].jobs_analyzed, it.jobs_analyzed || 0);\n  }\n}\nreturn Object.values(byId).map(json => ({ json }));"
+      },
+      "id": "3bb41c9b-c912-4198-98be-da9fb43bfe15",
+      "name": "Flatten Courses",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1072,
+        1968
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $('Prepare All').all().map(i => i.json);\nconst byId = {};\nfor (const it of items) {\n  for (const m of (it.modules || [])) {\n    if (!m.module_id) continue;\n    if (!byId[m.module_id]) {\n      byId[m.module_id] = {\n        module_id: m.module_id,\n        course_id: m.course_id,\n        title: m.title,\n        skill_name: m.skill_name,\n        description: m.description,\n        content: m.content,\n        resources_json: JSON.stringify(m.resources || []),\n        importance_score: m.importance_score || 0,\n        market_demand_percent: m.market_demand_percent || 0,\n        trend_percent: m.trend_percent || 0,\n        order_index: m.order_index || 0,\n        now: it.now,\n      };\n    }\n  }\n}\nreturn Object.values(byId).map(json => ({ json }));"
+      },
+      "id": "f7d398e9-8382-4b55-897d-d52a8efed457",
+      "name": "Flatten Modules",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1152,
+        2240
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $('Prepare All').all().map(i => i.json);\nconst out = [];\nconst seen = new Set();\nfor (const it of items) {\n  for (const m of (it.modules || [])) {\n    if (!m.module_id) continue;\n    const key = it.user_id + '::' + m.module_id;\n    if (seen.has(key)) continue;\n    seen.add(key);\n    // Per-module jobs: only the jobs whose skill gaps this module covers (fallback: all of the user's jobs)\n    const moduleJobs = (Array.isArray(m.job_ids) && m.job_ids.length) ? m.job_ids : (it.job_ids || []);\n    out.push({ json: {\n      user_id: it.user_id,\n      course_id: it.course_id,\n      module_id: m.module_id,\n      learning_id: 'learn_' + it.user_id + '_' + m.module_id,\n      priority_score: m.importance_score || 0,\n      reason: m.skill_name ? ('Skill gap: ' + m.skill_name) : '',\n      related_job_ids_json: JSON.stringify(moduleJobs),\n      now: it.now,\n    } });\n  }\n}\nreturn out;"
+      },
+      "id": "02105d8d-a04b-4272-abab-80bad1ff98ee",
+      "name": "Flatten Learning",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2160,
+        2288
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const courses = $('Prepare All').all().map(i => i.json);\nconst ok = courses.filter(c => c.course_id);\nconst courseIds = [...new Set(ok.map(c => c.course_id))];\nconst skipped = courses.filter(c => !c.course_id).map(c => ({ user_id: c.user_id, role: c.role, error: c.error }));\nreturn [{ json: { success: true, roles_processed: courses.length, unique_courses: courseIds.length, course_ids: courseIds, skipped } }];"
+      },
+      "id": "05b3f2d8-7d47-4d3f-bdd9-fa32e03aca8d",
+      "name": "Done",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2608,
+        2016
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "user_learning",
+          "cachedResultName": "user_learning"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "user_id",
+              "keyValue": "={{ $json.user_id }}"
+            },
+            {
+              "keyName": "course_id",
+              "keyValue": "={{ $json.course_id }}"
+            },
+            {
+              "keyName": "module_id",
+              "keyValue": "={{ $json.module_id }}"
+            }
+          ]
+        },
+        "limit": 1
+      },
+      "id": "31849620-b7c7-4e06-b3c4-a06168373335",
+      "name": "Find Learning",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        2608,
+        2208
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "learning-exists",
+              "leftValue": "={{ ($json.id ?? \"\").toString() }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "6f3a8fb7-9c35-4524-a276-9ec482514023",
+      "name": "Learning Exists",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2832,
+        2208
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "user_learning",
+          "cachedResultName": "user_learning"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyValue": "={{ $json.id }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "priority_score": "={{ $(\"Loop Learning\").item.json.priority_score }}",
+            "reason": "={{ $(\"Loop Learning\").item.json.reason }}",
+            "related_job_ids_json": "={{ $(\"Loop Learning\").item.json.related_job_ids_json }}",
+            "updated_at": "={{ $(\"Loop Learning\").item.json.now }}"
+          },
+          "schema": [
+            {
+              "id": "priority_score",
+              "displayName": "priority_score",
+              "type": "number",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "reason",
+              "displayName": "reason",
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "related_job_ids_json",
+              "displayName": "related_job_ids_json",
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "updated_at",
+              "displayName": "updated_at",
+              "type": "string",
+              "canBeUsedToMatch": false
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "29785872-0fdb-48cb-bf6d-1b4b6314a287",
+      "name": "Update Learning Meta",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        3056,
+        2256
+      ]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "84140593-985a-4fbd-a89c-317ee9cd5af7",
+      "name": "Loop Learning",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        2384,
+        2288
+      ]
+    },
+    {
+      "parameters": {
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "user_learning",
+          "cachedResultName": "user_learning"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "learning_id": "={{ $(\"Loop Learning\").item.json.learning_id }}",
+            "user_id": "={{ $(\"Loop Learning\").item.json.user_id }}",
+            "course_id": "={{ $(\"Loop Learning\").item.json.course_id }}",
+            "module_id": "={{ $(\"Loop Learning\").item.json.module_id }}",
+            "priority_score": "={{ $(\"Loop Learning\").item.json.priority_score }}",
+            "reason": "={{ $(\"Loop Learning\").item.json.reason }}",
+            "related_job_ids_json": "={{ $(\"Loop Learning\").item.json.related_job_ids_json }}",
+            "status": "not_started",
+            "progress_percent": 0,
+            "updated_at": "={{ $(\"Loop Learning\").item.json.now }}"
+          },
+          "schema": [
+            {
+              "id": "learning_id",
+              "displayName": "learning_id",
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "user_id",
+              "displayName": "user_id",
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "course_id",
+              "displayName": "course_id",
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "module_id",
+              "displayName": "module_id",
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "priority_score",
+              "displayName": "priority_score",
+              "type": "number",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "reason",
+              "displayName": "reason",
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "related_job_ids_json",
+              "displayName": "related_job_ids_json",
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "progress_percent",
+              "displayName": "progress_percent",
+              "type": "number",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "updated_at",
+              "displayName": "updated_at",
+              "type": "string",
+              "canBeUsedToMatch": false
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "625e9afe-6ea2-452b-90b1-a0a3bf619600",
+      "name": "Insert Learning",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        3056,
+        2448
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "course_modules",
+          "cachedResultName": "course_modules"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "module_id",
+              "keyValue": "={{ $json.module_id }}"
+            }
+          ]
+        },
+        "limit": 1
+      },
+      "id": "ec66e8a4-533f-4388-a66f-81fb13e83790",
+      "name": "Find Module",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1600,
+        2160
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "module-exists",
+              "leftValue": "={{ ($json.id ?? \"\").toString() }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "0a9999bb-3e58-4376-9725-f80a6d5f36f5",
+      "name": "Module Exists",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1824,
+        2160
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "course_modules",
+          "cachedResultName": "course_modules"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyValue": "={{ $json.id }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "title": "={{ $(\"Loop Modules\").item.json.title }}",
+            "skill_name": "={{ $(\"Loop Modules\").item.json.skill_name }}",
+            "description": "={{ $(\"Loop Modules\").item.json.description }}",
+            "content": "={{ $(\"Loop Modules\").item.json.content }}",
+            "resources_json": "={{ $(\"Loop Modules\").item.json.resources_json }}",
+            "importance_score": "={{ $(\"Loop Modules\").item.json.importance_score }}",
+            "market_demand_percent": "={{ $(\"Loop Modules\").item.json.market_demand_percent }}",
+            "trend_percent": "={{ $(\"Loop Modules\").item.json.trend_percent }}",
+            "order_index": "={{ $(\"Loop Modules\").item.json.order_index }}",
+            "updated_at": "={{ $(\"Loop Modules\").item.json.now }}"
+          },
+          "schema": [
+            {
+              "id": "title",
+              "displayName": "title",
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "skill_name",
+              "displayName": "skill_name",
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "description",
+              "displayName": "description",
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "content",
+              "displayName": "content",
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "resources_json",
+              "displayName": "resources_json",
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "importance_score",
+              "displayName": "importance_score",
+              "type": "number",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "market_demand_percent",
+              "displayName": "market_demand_percent",
+              "type": "number",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "trend_percent",
+              "displayName": "trend_percent",
+              "type": "number",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "order_index",
+              "displayName": "order_index",
+              "type": "number",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "updated_at",
+              "displayName": "updated_at",
+              "type": "string",
+              "canBeUsedToMatch": false
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "80509865-b749-4659-988e-d1c7c7017c1a",
+      "name": "Update Module",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        2048,
+        2208
+      ]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "6d2691b8-0000-4ed8-ba0f-72c4067a9ce6",
+      "name": "Loop Modules",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        1376,
+        2240
+      ]
+    },
+    {
+      "parameters": {
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "course_modules",
+          "cachedResultName": "course_modules"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "module_id": "={{ $(\"Loop Modules\").item.json.module_id }}",
+            "course_id": "={{ $(\"Loop Modules\").item.json.course_id }}",
+            "title": "={{ $(\"Loop Modules\").item.json.title }}",
+            "skill_name": "={{ $(\"Loop Modules\").item.json.skill_name }}",
+            "description": "={{ $(\"Loop Modules\").item.json.description }}",
+            "content": "={{ $(\"Loop Modules\").item.json.content }}",
+            "resources_json": "={{ $(\"Loop Modules\").item.json.resources_json }}",
+            "importance_score": "={{ $(\"Loop Modules\").item.json.importance_score }}",
+            "market_demand_percent": "={{ $(\"Loop Modules\").item.json.market_demand_percent }}",
+            "trend_percent": "={{ $(\"Loop Modules\").item.json.trend_percent }}",
+            "order_index": "={{ $(\"Loop Modules\").item.json.order_index }}",
+            "created_at": "={{ $(\"Loop Modules\").item.json.now }}",
+            "updated_at": "={{ $(\"Loop Modules\").item.json.now }}"
+          },
+          "schema": [
+            {
+              "id": "module_id",
+              "displayName": "module_id",
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "course_id",
+              "displayName": "course_id",
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "title",
+              "displayName": "title",
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "skill_name",
+              "displayName": "skill_name",
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "description",
+              "displayName": "description",
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "content",
+              "displayName": "content",
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "resources_json",
+              "displayName": "resources_json",
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "importance_score",
+              "displayName": "importance_score",
+              "type": "number",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "market_demand_percent",
+              "displayName": "market_demand_percent",
+              "type": "number",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "trend_percent",
+              "displayName": "trend_percent",
+              "type": "number",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "order_index",
+              "displayName": "order_index",
+              "type": "number",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "created_at",
+              "displayName": "created_at",
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "updated_at",
+              "displayName": "updated_at",
+              "type": "string",
+              "canBeUsedToMatch": false
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "11673d23-7497-41a6-9b6b-26fd2110123d",
+      "name": "Insert Module",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        2048,
+        2400
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "courses",
+          "cachedResultName": "courses"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "course_id",
+              "keyValue": "={{ $json.course_id }}"
+            }
+          ]
+        },
+        "limit": 1
+      },
+      "id": "ca1112b9-671f-4289-9941-7d748f3ac7be",
+      "name": "Find Course",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1520,
+        1888
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "course-exists",
+              "leftValue": "={{ ($json.id ?? \"\").toString() }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "021746a3-3cf1-428f-aa76-d65fd59e7d54",
+      "name": "Course Exists",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1744,
+        1888
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "courses",
+          "cachedResultName": "courses"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyValue": "={{ $json.id }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "name": "={{ $(\"Loop Courses\").item.json.name }}",
+            "description": "={{ $(\"Loop Courses\").item.json.description }}",
+            "role": "={{ $(\"Loop Courses\").item.json.role }}",
+            "jobs_analyzed": "={{ $(\"Loop Courses\").item.json.jobs_analyzed }}",
+            "skills_snapshot_json": "={{ $(\"Loop Courses\").item.json.skills_snapshot_json }}",
+            "version": "={{ ($json.version ?? 1) + 1 }}",
+            "updated_at": "={{ $(\"Loop Courses\").item.json.now }}"
+          },
+          "schema": [
+            {
+              "id": "name",
+              "displayName": "name",
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "description",
+              "displayName": "description",
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "role",
+              "displayName": "role",
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "jobs_analyzed",
+              "displayName": "jobs_analyzed",
+              "type": "number",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "skills_snapshot_json",
+              "displayName": "skills_snapshot_json",
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "version",
+              "displayName": "version",
+              "type": "number",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "updated_at",
+              "displayName": "updated_at",
+              "type": "string",
+              "canBeUsedToMatch": false
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "ffed286d-d751-4eec-8e12-0d85afc3db0c",
+      "name": "Update Course",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1968,
+        1936
+      ]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "f597f090-6522-478e-8ffd-8a43b4ec33f5",
+      "name": "Loop Courses",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        1296,
+        1968
+      ]
+    },
+    {
+      "parameters": {
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "courses",
+          "cachedResultName": "courses"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "course_id": "={{ $(\"Loop Courses\").item.json.course_id }}",
+            "role": "={{ $(\"Loop Courses\").item.json.role }}",
+            "name": "={{ $(\"Loop Courses\").item.json.name }}",
+            "description": "={{ $(\"Loop Courses\").item.json.description }}",
+            "version": 1,
+            "jobs_analyzed": "={{ $(\"Loop Courses\").item.json.jobs_analyzed }}",
+            "skills_snapshot_json": "={{ $(\"Loop Courses\").item.json.skills_snapshot_json }}",
+            "is_active": true,
+            "generated_at": "={{ $(\"Loop Courses\").item.json.now }}",
+            "updated_at": "={{ $(\"Loop Courses\").item.json.now }}"
+          },
+          "schema": [
+            {
+              "id": "course_id",
+              "displayName": "course_id",
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "role",
+              "displayName": "role",
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "name",
+              "displayName": "name",
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "description",
+              "displayName": "description",
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "version",
+              "displayName": "version",
+              "type": "number",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "jobs_analyzed",
+              "displayName": "jobs_analyzed",
+              "type": "number",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "skills_snapshot_json",
+              "displayName": "skills_snapshot_json",
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "is_active",
+              "displayName": "is_active",
+              "type": "boolean",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "generated_at",
+              "displayName": "generated_at",
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "updated_at",
+              "displayName": "updated_at",
+              "type": "string",
+              "canBeUsedToMatch": false
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "edf2a30a-de74-45d4-8053-5284764e4da7",
+      "name": "Insert Course",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1968,
+        2128
+      ]
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "claude-sonnet-5"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=ROLE: {{ $json.role }}\n\nAggregated skill gaps (most frequent first, with counts):\n{{ JSON.stringify($json.skills) }}\n\nAvailable course resources (ONLY these URLs may be used):\n{{ JSON.stringify($json.course_resources) }}\n\nAvailable practice resources (ONLY these URLs may be used):\n{{ JSON.stringify($json.practice_resources) }}"
+            }
+          ]
+        },
+        "options": {
+          "system": "You build a personal learning course for ONE candidate and ONE target role, from the skill gaps found across the candidate's recommended jobs. Return ONLY a JSON object (no markdown fences, no surrounding text) with exactly:\n{\n  \"course_name\": string,          // e.g. \"Machine Learning Engineer — Your Skill Path\"\n  \"course_description\": string,   // 1-3 sentences describing what the course covers for this candidate\n  \"modules\": [\n    {\n      \"skill_name\": string,       // the core skill this module teaches\n      \"source_skills\": [string],  // the input skill names this module covers, copied VERBATIM from the \"skill\" fields of the aggregated skill gaps\n      \"title\": string,            // module title\n      \"description\": string,      // 1-2 sentence summary\n      \"content\": string,          // 2-4 paragraph study guide for this skill\n      \"importance_score\": number, // 0-100, how important this skill is for the role\n      \"market_demand_percent\": number, // 0-100\n      \"trend_percent\": number,    // -100..100, direction of demand\n      \"resources\": [ { \"title\": string, \"url\": string } ]  // pick the most relevant from the provided pools\n    }\n  ]\n}\nRules: Create one module per major skill gap (you may merge closely related gaps into one module and list all of them in source_skills), at most 8, ordered most-important first. Every module must have at least one entry in source_skills. NEVER invent URLs — resources may only contain URLs copied verbatim from the provided course/practice pools; if none fit, use an empty array. Be concise and specific to the role. Never suggest learning a spoken language.",
+          "maxTokens": 16000
+        }
+      },
+      "id": "b3e27f7c-df9c-4382-b3a8-32c62c70586c",
+      "name": "Synthesize Course",
+      "type": "@n8n/n8n-nodes-langchain.anthropic",
+      "typeVersion": 1,
+      "position": [
+        880,
+        1872
+      ],
+      "credentials": {
+        "anthropicApi": {
+          "name": "Anthropic account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const src = $('Loop Roles').item.json;\nconst res = $json;\nlet text = '';\nif (Array.isArray(res.content)) text = res.content.filter(c => c.type === 'text').map(c => c.text).join('\\n');\nelse text = res.text || res.merged_response || '';\n\nconst m = text.match(/\\{[\\s\\S]*\\}/);\nlet parsed;\ntry { parsed = JSON.parse(m ? m[0] : text); }\ncatch (e) {\n  // Truncated / invalid model output: skip this user's course this run instead of failing the run for every user\n  return { json: { user_id: src.user_id, role: src.role, course_id: null, skipped: true, error: 'Course JSON invalid: ' + String(text).slice(0, 300), modules: [], job_ids: [] } };\n}\n\nfunction slug(s) { return String(s || '').toLowerCase().trim().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 60); }\nconst nowIso = new Date().toISOString();\n\n// skill slug -> job_ids that listed this skill gap (per-user, from Build Role Aggregates)\nconst jobsBySkill = {};\nfor (const s of (src.skills || [])) {\n  const k = slug(s.skill);\n  if (k) jobsBySkill[k] = Array.from(new Set([...(jobsBySkill[k] || []), ...(s.job_ids || [])]));\n}\nfunction moduleJobIds(mm) {\n  const names = [].concat(Array.isArray(mm.source_skills) ? mm.source_skills : [], mm.skill_name ? [mm.skill_name] : []);\n  const ids = new Set();\n  for (const n of names) {\n    const k = slug(n);\n    if (!k) continue;\n    if (jobsBySkill[k]) { jobsBySkill[k].forEach(id => ids.add(id)); continue; }\n    // fuzzy fallback: slug containment either way\n    for (const sk of Object.keys(jobsBySkill)) {\n      if (sk.includes(k) || k.includes(sk)) jobsBySkill[sk].forEach(id => ids.add(id));\n    }\n  }\n  return ids.size ? Array.from(ids) : (src.job_ids || []);\n}\n\nconst usedSlugs = {};\nconst modules = (parsed.modules || []).slice(0, 8).map((mm, idx) => {\n  let base = slug(mm.skill_name || mm.title || ('module_' + idx)) || ('module_' + idx);\n  let key = base;\n  let n = 2;\n  while (usedSlugs[key]) { key = base + '_' + n; n++; }\n  usedSlugs[key] = true;\n  const resources = Array.isArray(mm.resources) ? mm.resources.filter(r => r && r.url) : [];\n  return {\n    module_id: src.course_id + '_' + key,\n    course_id: src.course_id,\n    title: mm.title || mm.skill_name || ('Module ' + (idx + 1)),\n    skill_name: mm.skill_name || '',\n    description: mm.description || '',\n    content: mm.content || '',\n    resources: resources,\n    importance_score: Number(mm.importance_score) || 0,\n    market_demand_percent: Number(mm.market_demand_percent) || 0,\n    trend_percent: Number(mm.trend_percent) || 0,\n    order_index: idx,\n    job_ids: moduleJobIds(mm),\n  };\n});\n\nreturn { json: {\n  user_id: src.user_id,\n  auth_user_id: src.auth_user_id,\n  role: src.role,\n  course_id: src.course_id,\n  course_name: parsed.course_name || parsed.name || src.role,\n  course_description: parsed.course_description || parsed.description || '',\n  jobs_analyzed: (src.job_ids || []).length,\n  skills_snapshot: (src.skills || []).map(s => s.skill),\n  job_ids: src.job_ids || [],\n  modules: modules,\n  now: nowIso,\n} };\n"
+      },
+      "id": "c757c873-141d-4cf1-a32e-28ca2b824635",
+      "name": "Parse Course",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1104,
+        1936
+      ]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "71b2049a-3c60-4b6c-9c93-9175b3492102",
+      "name": "Loop Roles",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        656,
+        1872
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "course_modules",
+          "cachedResultName": "course_modules"
+        },
+        "returnAll": true
+      },
+      "id": "75ee43ac-0d68-4452-9043-1d19a71282c0",
+      "name": "Get Modules For Prune",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1632,
+        2128
+      ],
+      "alwaysOutputData": true,
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "user_learning",
+          "cachedResultName": "user_learning"
+        },
+        "returnAll": true
+      },
+      "id": "a76bedca-e1c5-441a-bbaf-4c430586162b",
+      "name": "Get Learning For Prune",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1856,
+        2128
+      ],
+      "alwaysOutputData": true,
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Modules of the courses regenerated in THIS run that the model no longer produced.\n// Modules with any user progress are kept so nobody loses completed work.\nconst fresh = $('Prepare All').all().map(i => i.json);\nconst courseIds = new Set(fresh.map(c => c.course_id).filter(Boolean));\nconst keep = new Set(fresh.flatMap(c => (c.modules || []).map(m => m.module_id)));\nconst learning = $('Get Learning For Prune').all().map(i => i.json).filter(r => r && r.module_id);\nconst touched = new Set(learning\n  .filter(r => (Number(r.progress_percent) || 0) > 0 || (r.status && r.status !== 'not_started'))\n  .map(r => r.module_id));\nconst stale = $('Get Modules For Prune').all().map(i => i.json)\n  .filter(m => m && m.module_id && courseIds.has(m.course_id) && !keep.has(m.module_id) && !touched.has(m.module_id));\n// Always emit at least one item so the rest of the flow continues; the placeholder matches no rows.\nif (stale.length === 0) return [{ json: { course_id: '__none__', module_id: '__none__', placeholder: true } }];\nreturn stale.map(m => ({ json: { course_id: m.course_id, module_id: m.module_id } }));"
+      },
+      "id": "ac903d6f-1b62-4a5c-9b53-2bf8092f1445",
+      "name": "Find Stale Modules",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2080,
+        2128
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "deleteRows",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "course_modules",
+          "cachedResultName": "course_modules"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "course_id",
+              "keyValue": "={{ $json.course_id }}"
+            },
+            {
+              "keyName": "module_id",
+              "keyValue": "={{ $json.module_id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "d18476f5-4109-4c40-93ba-3840ae49f3d4",
+      "name": "Delete Stale Modules",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        2304,
+        2032
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "operation": "deleteRows",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "user_learning",
+          "cachedResultName": "user_learning"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "course_id",
+              "keyValue": "={{ $json.course_id }}"
+            },
+            {
+              "keyName": "module_id",
+              "keyValue": "={{ $json.module_id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "995a4081-b1bf-4bc9-b4f7-da817965dfe2",
+      "name": "Delete Stale Learning",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        2304,
+        2224
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "Per-user",
+              "leftValue": "={{ !!(($json.query && $json.query.auth_user_id) || ($json.body && $json.body.auth_user_id)) }}",
+              "operator": {
+                "operation": "true",
+                "singleValue": true,
+                "type": "boolean"
+              },
+              "rightValue": ""
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          }
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "9529a1ac-1359-4039-bb5f-3028777a4e97",
+      "name": "Per user?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        224,
+        1712
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "REPLACE_WITH_ID_OF: REFRESH_LEARNING_MATERIALS",
+          "cachedResultName": "REFRESH_LEARNING_MATERIALS"
+        },
+        "workflowInputs": {
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false,
+          "mappingMode": "defineBelow",
+          "matchingColumns": [],
+          "schema": [
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "auth_user_id",
+              "id": "auth_user_id",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "force",
+              "id": "force",
+              "required": false,
+              "type": "boolean"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "search_jobs",
+              "id": "search_jobs",
+              "required": false,
+              "type": "boolean"
+            }
+          ],
+          "value": {
+            "auth_user_id": "={{ ($json.query && $json.query.auth_user_id) || ($json.body && $json.body.auth_user_id) }}",
+            "force": true,
+            "search_jobs": true
+          }
+        },
+        "options": {
+          "waitForSubWorkflow": false
+        }
+      },
+      "id": "e59bc556-1c56-4fd6-b1ea-30daa647bf7e",
+      "name": "Start full pipeline",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        448,
+        1712
+      ],
+      "notes": "Runs this workflow's one-user path in the background: job search -> prep + referrals -> course."
+    },
+    {
+      "parameters": {
+        "jsCode": "const w = $('Regenerate (Lovable)').first().json;\nconst id = (w.query && w.query.auth_user_id) || (w.body && w.body.auth_user_id);\nreturn [{ json: {\n  success: true,\n  status: 'started',\n  auth_user_id: id,\n  message: 'Job search, interview prep, referrals and the course are being (re)built for this user. Poll /webhook/courses (and /webhook/jobs, /webhook/referrals); the course appears when every job has its prep plan, usually within 5-15 minutes.'\n} }];"
+      },
+      "id": "c0442e5f-77aa-45f2-b04e-2a400306e038",
+      "name": "Pipeline started",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        1712
+      ],
+      "notes": "Response to the frontend."
+    },
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "auth_user_id"
+            },
+            {
+              "name": "force",
+              "type": "boolean"
+            },
+            {
+              "name": "search_jobs",
+              "type": "boolean"
+            }
+          ]
+        }
+      },
+      "id": "574ccd4b-3851-4a6e-b39f-c41bd31a1350",
+      "name": "When called (one user)",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        2112
+      ],
+      "notes": "auth_user_id; force = rebuild even if nothing new; search_jobs = run the LinkedIn job search (Process User) first."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "Search-jobs-first",
+              "leftValue": "={{ $json.search_jobs === true }}",
+              "operator": {
+                "operation": "true",
+                "singleValue": true,
+                "type": "boolean"
+              },
+              "rightValue": ""
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          }
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "f3db34cc-2cc2-492b-92ec-2d874e8f435f",
+      "name": "Search jobs first?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        256,
+        2176
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "users",
+          "cachedResultName": "users"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "auth_user_id",
+              "keyValue": "={{ $json.auth_user_id }}"
+            }
+          ]
+        },
+        "limit": 1
+      },
+      "id": "8894fe28-21f9-4917-b46d-8072960b0166",
+      "name": "Find user for search",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        480,
+        2064
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "REPLACE_WITH_ID_OF: Find Vacancy — Process User",
+          "cachedResultName": "Find Vacancy — Process User"
+        },
+        "workflowInputs": {
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true,
+          "mappingMode": "defineBelow",
+          "matchingColumns": [],
+          "schema": [],
+          "value": {}
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "df530b0e-721a-4c17-9b35-ee19c3e69d8a",
+      "name": "Run job search",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        704,
+        2064
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "notes": "Find Vacancy - Process User for this user (saves jobs, then starts get_materials + Referals). Waits for it."
+    },
+    {
+      "parameters": {
+        "jsCode": "const t = $('When called (one user)').first().json;\nconst id = String(t.auth_user_id || '').trim();\nif (!id) throw new Error('auth_user_id is required');\nreturn [{ json: { auth_user_id: id, force: t.force === true } }];\n"
+      },
+      "id": "50e6c6b4-fc4e-4ceb-b269-8b6bc427736e",
+      "name": "One user input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        928,
+        2176
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "users",
+          "cachedResultName": "users"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "auth_user_id",
+              "keyValue": "={{ $json.auth_user_id }}"
+            }
+          ]
+        },
+        "limit": 1
+      },
+      "id": "c3b799a5-daf1-4ce5-b040-f4d510ec3e4e",
+      "name": "Get this user",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1152,
+        2176
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "user_jobs",
+          "cachedResultName": "user_jobs"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "user_id",
+              "keyValue": "={{ String($('Get this user').first().json.id ?? '') }}"
+            }
+          ]
+        },
+        "returnAll": true
+      },
+      "id": "23aa3b1a-49cc-43b2-ad2a-134657704a57",
+      "name": "Get this user jobs",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1376,
+        2176
+      ],
+      "alwaysOutputData": true,
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Decides whether this user's course can be (re)built now.\n// preparing   = some jobs still have no interview-prep plan (get_materials calls this again when it finishes)\n// building    = all jobs prepared and (force, or prep newer than the last course build)\n// up_to_date  = nothing new since the last course build\nconst inp = $('One user input').first().json;\nconst u = $('Get this user').first().json || {};\nif (u.id === undefined || u.id === null) return [{ json: { go: false, status: 'user_not_found', auth_user_id: inp.auth_user_id } }];\nconst rows = $('Get this user jobs').all().map(i => i.json).filter(r => r && r.job_id && r.hidden !== true);\nconst ready = rows.filter(r => r.prep_status === 'ready');\nconst pending = rows.length - ready.length;\nconst newest = ready.reduce((m, r) => Math.max(m, r.prep_updated_at ? new Date(r.prep_updated_at).getTime() : 0), 0);\nconst last = u.last_course_refresh_at ? new Date(u.last_course_refresh_at).getTime() : 0;\nlet go = false, status;\nif (!rows.length) status = 'no_jobs';\nelse if (pending > 0) status = 'preparing';\nelse if (inp.force || !last || newest > last) { go = true; status = 'building'; }\nelse status = 'up_to_date';\nreturn [{ json: { go, status, auth_user_id: inp.auth_user_id, user_row_id: u.id, jobs: rows.length, ready_jobs: ready.length, pending_jobs: pending } }];\n"
+      },
+      "id": "b2b1d075-18b3-4595-8e52-6384369d7e0e",
+      "name": "Course check",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1600,
+        2176
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "Build-course",
+              "leftValue": "={{ $json.go === true }}",
+              "operator": {
+                "operation": "true",
+                "singleValue": true,
+                "type": "boolean"
+              },
+              "rightValue": ""
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          }
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "614089f1-3c4c-4a6e-89f4-0cb2d2260aa5",
+      "name": "Build course?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1824,
+        2176
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "users",
+          "cachedResultName": "users"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyValue": "={{ $json.user_row_id }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "schema": [
+            {
+              "canBeUsedToMatch": false,
+              "displayName": "last_course_refresh_at",
+              "id": "last_course_refresh_at",
+              "type": "dateTime"
+            }
+          ],
+          "value": {
+            "last_course_refresh_at": "={{ $now.toISO() }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "90055fb4-dd21-4438-a848-6af3eae002ff",
+      "name": "Mark course refresh",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        2048,
+        2064
+      ],
+      "alwaysOutputData": true,
+      "notes": "users.last_course_refresh_at = now"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { success: true, ...$input.first().json } }];"
+      },
+      "id": "975432ad-42b4-42ac-9ec5-0d2d608e12a5",
+      "name": "Not yet",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2048,
+        2272
+      ]
+    }
+  ],
+  "connections": {
+    "Every 12 hours": {
+      "main": [
+        [
+          {
+            "node": "Get Users",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Users": {
+      "main": [
+        [
+          {
+            "node": "Get All User Jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get All User Jobs": {
+      "main": [
+        [
+          {
+            "node": "Build Role Aggregates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Role Aggregates": {
+      "main": [
+        [
+          {
+            "node": "Loop Roles",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare All": {
+      "main": [
+        [
+          {
+            "node": "Flatten Courses",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Flatten Courses": {
+      "main": [
+        [
+          {
+            "node": "Loop Courses",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Flatten Modules": {
+      "main": [
+        [
+          {
+            "node": "Loop Modules",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Flatten Learning": {
+      "main": [
+        [
+          {
+            "node": "Loop Learning",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Learning": {
+      "main": [
+        [
+          {
+            "node": "Learning Exists",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Learning Exists": {
+      "main": [
+        [
+          {
+            "node": "Update Learning Meta",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Insert Learning",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Learning Meta": {
+      "main": [
+        [
+          {
+            "node": "Loop Learning",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Learning": {
+      "main": [
+        [
+          {
+            "node": "Done",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Find Learning",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Learning": {
+      "main": [
+        [
+          {
+            "node": "Loop Learning",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Module": {
+      "main": [
+        [
+          {
+            "node": "Module Exists",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Module Exists": {
+      "main": [
+        [
+          {
+            "node": "Update Module",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Insert Module",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Module": {
+      "main": [
+        [
+          {
+            "node": "Loop Modules",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Modules": {
+      "main": [
+        [
+          {
+            "node": "Get Modules For Prune",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Find Module",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Module": {
+      "main": [
+        [
+          {
+            "node": "Loop Modules",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Course": {
+      "main": [
+        [
+          {
+            "node": "Course Exists",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Course Exists": {
+      "main": [
+        [
+          {
+            "node": "Update Course",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Insert Course",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Course": {
+      "main": [
+        [
+          {
+            "node": "Loop Courses",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Courses": {
+      "main": [
+        [
+          {
+            "node": "Flatten Modules",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Find Course",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Course": {
+      "main": [
+        [
+          {
+            "node": "Loop Courses",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Synthesize Course": {
+      "main": [
+        [
+          {
+            "node": "Parse Course",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Course": {
+      "main": [
+        [
+          {
+            "node": "Loop Roles",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Roles": {
+      "main": [
+        [
+          {
+            "node": "Prepare All",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Synthesize Course",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Modules For Prune": {
+      "main": [
+        [
+          {
+            "node": "Get Learning For Prune",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Learning For Prune": {
+      "main": [
+        [
+          {
+            "node": "Find Stale Modules",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Stale Modules": {
+      "main": [
+        [
+          {
+            "node": "Delete Stale Modules",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Delete Stale Learning",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Delete Stale Learning": {
+      "main": [
+        [
+          {
+            "node": "Flatten Learning",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Regenerate (Lovable)": {
+      "main": [
+        [
+          {
+            "node": "Per user?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Per user?": {
+      "main": [
+        [
+          {
+            "node": "Start full pipeline",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Get Users",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Start full pipeline": {
+      "main": [
+        [
+          {
+            "node": "Pipeline started",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When called (one user)": {
+      "main": [
+        [
+          {
+            "node": "Search jobs first?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search jobs first?": {
+      "main": [
+        [
+          {
+            "node": "Find user for search",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "One user input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find user for search": {
+      "main": [
+        [
+          {
+            "node": "Run job search",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run job search": {
+      "main": [
+        [
+          {
+            "node": "One user input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "One user input": {
+      "main": [
+        [
+          {
+            "node": "Get this user",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get this user": {
+      "main": [
+        [
+          {
+            "node": "Get this user jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get this user jobs": {
+      "main": [
+        [
+          {
+            "node": "Course check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Course check": {
+      "main": [
+        [
+          {
+            "node": "Build course?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build course?": {
+      "main": [
+        [
+          {
+            "node": "Mark course refresh",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Not yet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark course refresh": {
+      "main": [
+        [
+          {
+            "node": "Get Users",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "pinData": {}
+}

@@ -1,0 +1,290 @@
+{
+  "name": "PDF Extractor",
+  "nodes": [
+    {
+      "id": "e70b1f42-557f-4453-ba3d-b3db4cade3e4",
+      "name": "When Executed by Another Workflow",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        208,
+        0
+      ],
+      "parameters": {
+        "inputSource": "passthrough"
+      }
+    },
+    {
+      "id": "4060c96d-4116-42a4-a502-df32a0b13a31",
+      "name": "Extract from File",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.1,
+      "position": [
+        448,
+        0
+      ],
+      "parameters": {
+        "operation": "pdf",
+        "binaryPropertyName": "CV",
+        "options": {}
+      }
+    },
+    {
+      "id": "a86be754-bec7-4caa-82b3-418ba2f3eabd",
+      "name": "Edit Fields",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        672,
+        0
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "66be1c7c-2278-41b1-8e34-950be9968f5d",
+              "name": "cv_text",
+              "value": "={{ $json.text }}",
+              "type": "string"
+            },
+            {
+              "id": "3cf1dcdd-2a2d-4352-aed7-6f58b5741d59",
+              "name": "user_prompt",
+              "value": "={{ $('When Executed by Another Workflow').item.json['What jobs are you looking for?'] }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "ed26fc8e-5761-4a39-95d3-77479e5b516e",
+      "name": "Information Extractor",
+      "type": "@n8n/n8n-nodes-langchain.informationExtractor",
+      "typeVersion": 1.2,
+      "position": [
+        896,
+        0
+      ],
+      "parameters": {
+        "text": "=CV:\n{{ $json.cv_text }}\n\nUSER JOB PREFERENCES:\n{{ $json.user_prompt }}",
+        "attributes": {
+          "attributes": [
+            {
+              "name": "name",
+              "description": "Candidate full name from CV"
+            },
+            {
+              "name": "education",
+              "description": "Education entries explicitly stated in CV"
+            },
+            {
+              "name": "skills",
+              "description": "Technical/professional skills explicitly stated in CV"
+            },
+            {
+              "name": "experience",
+              "description": "Work experience explicitly stated in CV"
+            },
+            {
+              "name": "projects",
+              "description": "Projects explicitly stated in CV"
+            },
+            {
+              "name": "languages",
+              "description": "Languages explicitly stated in CV"
+            },
+            {
+              "name": "work_authorization",
+              "description": "Only if explicitly stated; otherwise empty"
+            },
+            {
+              "name": "target_roles",
+              "description": "Roles requested by the user"
+            },
+            {
+              "name": "locations",
+              "description": "Locations requested by the user"
+            },
+            {
+              "name": "employment_type",
+              "description": "Full-time/part-time/etc. from user prompt"
+            },
+            {
+              "name": "minimum_salary",
+              "description": "Minimum salary if specified, otherwise empty/null"
+            },
+            {
+              "name": "max_experience_years",
+              "description": "Max years of required experience user accepts, if given"
+            },
+            {
+              "name": "preferred_industries",
+              "description": "Industries requested by user"
+            },
+            {
+              "name": "avoid_keywords",
+              "description": "Roles/conditions user wants to avoid"
+            },
+            {
+              "name": "minimum_fit_score",
+              "description": "Use 70 unless user specifies another value"
+            }
+          ]
+        },
+        "options": {
+          "systemPromptTemplate": "You are an expert extraction algorithm.\nOnly extract relevant information from the text.\n\nYou extract a structured candidate profile for an autonomous job-search system.\n\nYou receive:\n1. CV text containing factual information about the candidate.\n2. Job-search preferences provided by the candidate.\n\nRules:\n- Extract only facts explicitly supported by the CV or user input.\n- Never invent skills, experience, education, languages, work authorization, salary requirements, or preferences.\n- Do not assume proficiency levels unless explicitly stated.\n- If information is missing, leave the field empty or null.\n- Separate information about the candidate from information about the jobs they want.\n- Normalize obvious wording where useful. For example, \"embedded jobs\" may become \"Embedded Engineer\".\n- Preserve specific technologies and technical skills exactly when possible.\n- Treat negative preferences such as \"no night shifts\" or \"avoid senior jobs\" as exclusions.\n- Do not reject or rank jobs at this stage. This step only creates the candidate/search profile.\nIf you do not know the value of an attribute asked to extract, you may omit the attribute's value."
+        }
+      }
+    },
+    {
+      "id": "ccdc6020-620e-45d0-86ea-389b787b2b63",
+      "name": "OpenAI Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        624,
+        208
+      ],
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-5.4-nano",
+          "mode": "list",
+          "cachedResultName": "gpt-5.4-nano"
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "credentials": {
+        "openAiApi": {
+          "name": "OpenAI account"
+        }
+      }
+    },
+    {
+      "id": "2382f708-86ba-4921-ba9d-aeca7e296343",
+      "name": "Format candidate profile",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1232,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const raw = $input.first().json;\n\n// Information Extractor puts everything inside \"output\"\nconst d = raw.output ?? raw;\n\nfunction toArray(value) {\n  if (Array.isArray(value)) return value;\n  if (value === null || value === undefined || value === \"\") return [];\n\n  return String(value)\n    .split(/[\\n,;]+/)\n    .map(x => x.trim())\n    .filter(Boolean);\n}\n\nfunction toSingleItemArray(value) {\n  if (Array.isArray(value)) return value;\n  if (value === null || value === undefined || value === \"\") return [];\n  return [String(value).trim()];\n}\n\nreturn [\n  {\n    json: {\n      candidate: {\n        name: d.name ?? \"\",\n        education: toSingleItemArray(d.education),\n        skills: toArray(d.skills),\n        experience: toSingleItemArray(d.experience),\n        projects: toSingleItemArray(d.projects),\n        languages: toArray(d.languages),\n        work_authorization: toArray(d.work_authorization)\n      },\n\n      job_preferences: {\n        target_roles: toArray(d.target_roles),\n        locations: toArray(d.locations),\n        employment_type: toArray(d.employment_type),\n        minimum_salary: d.minimum_salary ?? null,\n        max_experience_years:\n          d.max_experience_years !== null &&\n          d.max_experience_years !== undefined &&\n          d.max_experience_years !== \"\"\n            ? Number(d.max_experience_years)\n            : null,\n        preferred_industries: toArray(d.preferred_industries),\n        avoid_keywords: toArray(d.avoid_keywords),\n        minimum_fit_score:\n          d.minimum_fit_score !== null &&\n          d.minimum_fit_score !== undefined &&\n          d.minimum_fit_score !== \"\"\n            ? Number(d.minimum_fit_score)\n            : 70\n      }\n    }\n  }\n];"
+      }
+    },
+    {
+      "id": "6b6c4c91-ce7a-47ad-9e3a-23440c041564",
+      "name": "On form submission",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.6,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "formTitle": "Career Agent Test",
+        "formDescription": "Upload your CV and describe the type of job you are looking for.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "CV",
+              "fieldType": "file"
+            },
+            {
+              "fieldLabel": "What jobs are you looking for?",
+              "fieldType": "textarea"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "webhookId": "34a549b9-5fb3-44f8-a130-c529ccc47955"
+    },
+    {
+      "id": "672eeebb-d66f-4cc1-9b9a-2a6527b4f945",
+      "name": "Profile Info from front (CV pdf, City, Position)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -112,
+        208
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "career-profile",
+        "responseMode": "onReceived",
+        "options": {
+          "allowedOrigins": "*",
+          "binaryPropertyName": "data"
+        }
+      },
+      "webhookId": "a9f545f9-84dc-4294-8a21-4acd78fef721"
+    }
+  ],
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Extract from File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract from File": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "Information Extractor",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Information Extractor": {
+      "main": [
+        [
+          {
+            "node": "Format candidate profile",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Information Extractor",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "pinData": {}
+}

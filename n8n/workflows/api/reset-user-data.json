@@ -1,0 +1,1186 @@
+{
+  "name": "RESET_USER_DATA",
+  "nodes": [
+    {
+      "id": "77fb7c6a-060d-4972-a7a2-0501475bce60",
+      "name": "Webhook POST user-data-reset",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        96
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "user-data-reset",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "webhookId": "a6e4d9a2-5687-489d-8a5a-418f2d2981df"
+    },
+    {
+      "id": "aef69eb9-6f4e-40e5-875a-553bf88f96cd",
+      "name": "Find User",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        224,
+        96
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "users",
+          "cachedResultName": "users"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "auth_user_id",
+              "condition": "eq",
+              "keyValue": "={{ String(($json.body && $json.body.auth_user_id) ?? ($json.query && $json.query.auth_user_id) ?? '').trim() }}"
+            }
+          ]
+        },
+        "returnAll": false,
+        "limit": 1
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "a97a9305-a9c6-4e5b-b135-19bb67a7af83",
+      "name": "Load all user_jobs",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        448,
+        96
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "user_jobs",
+          "cachedResultName": "user_jobs"
+        },
+        "returnAll": true
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "91495518-9d95-4e89-952b-9b71867e5725",
+      "name": "Load all user_learning",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        672,
+        96
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "user_learning",
+          "cachedResultName": "user_learning"
+        },
+        "returnAll": true
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "bdfab374-3e9d-405c-9653-397ab41d8db8",
+      "name": "Load all courses",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        896,
+        96
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "courses",
+          "cachedResultName": "courses"
+        },
+        "returnAll": true
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "6fb50086-9097-4a21-a039-5cd1b47afca8",
+      "name": "Load all course_modules",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1120,
+        96
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "course_modules",
+          "cachedResultName": "course_modules"
+        },
+        "returnAll": true
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "7ffe26d6-06af-4935-9778-102f81d54d5b",
+      "name": "Load all referral_drafts",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1344,
+        96
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "referral_drafts",
+          "cachedResultName": "referral_drafts"
+        },
+        "returnAll": true
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "11d3f2ec-b5a8-47e0-b633-7ddf31c3278b",
+      "name": "Load all job_preparations",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1568,
+        96
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "job_preparations",
+          "cachedResultName": "job_preparations"
+        },
+        "returnAll": true
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "06437e78-4034-4a7f-b17f-31cde07f7f4c",
+      "name": "Load all job_connections",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1792,
+        96
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "job_connections",
+          "cachedResultName": "job_connections"
+        },
+        "returnAll": true
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "2c879e97-1368-42ee-a362-838f2f31c114",
+      "name": "Load all connections",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        2016,
+        96
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "connections",
+          "cachedResultName": "connections"
+        },
+        "returnAll": true
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "75c1c7ca-5f09-4d4a-9a55-02a1b226d9d0",
+      "name": "Build Plan",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2240,
+        96
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// Decides exactly which rows belong to this user. Nothing is deleted here.\nconst w = $('Webhook POST user-data-reset').first().json;\nconst b = (w.body && typeof w.body === 'object') ? w.body : {};\nconst q = w.query || {};\nconst A = String(b.auth_user_id ?? q.auth_user_id ?? '').trim();\nconst dv = b.dry_run ?? q.dry_run;\nconst dryRun = dv === true || dv === 'true' || dv === 1 || dv === '1';\n\nconst fail = (error) => [{ json: { action: 'respond', response: { success: false, error, auth_user_id: A || null, dry_run: dryRun } } }];\nif (!A) return fail('missing_auth_user_id');\n\nconst user = $('Find User').all().map(i => i.json).find(u => u && u.auth_user_id === A && u.id !== undefined && u.id !== null);\nif (!user) return fail('user_not_found');\nconst uid = String(user.id);   // users row id = the user_id used in user_jobs / user_learning\n\nconst rows = (n) => $(n).all().map(i => i.json).filter(r => r && r.id !== undefined && r.id !== null);\nconst userJobs = rows('Load all user_jobs');\nconst learning = rows('Load all user_learning');\nconst courses = rows('Load all courses');\nconst modules = rows('Load all course_modules');\nconst drafts = rows('Load all referral_drafts');\nconst preps = rows('Load all job_preparations');\nconst jobConns = rows('Load all job_connections');\nconst conns = rows('Load all connections');\n\nfunction parseArr(v) { if (!v) return []; if (Array.isArray(v)) return v; try { const p = JSON.parse(v); return Array.isArray(p) ? p : []; } catch (e) { return []; } }\n// A row that carries auth_user_id belongs to that auth user; user_id is only used when auth_user_id is empty.\nconst isMineUJ = (r) => r.auth_user_id ? r.auth_user_id === A : String(r.user_id ?? '') === uid;\nconst isMineUserId = (r) => { const v = String(r.user_id ?? ''); return v !== '' && (v === uid || v === A); };\n\nconst myUJ = userJobs.filter(isMineUJ);\nconst otherUJ = userJobs.filter(r => !isMineUJ(r));\nconst myDrafts = drafts.filter(r => r.auth_user_id === A);\nconst otherDrafts = drafts.filter(r => r.auth_user_id !== A);\nconst myLearning = learning.filter(r => String(r.user_id ?? '') === uid);\nconst otherLearning = learning.filter(r => String(r.user_id ?? '') !== uid);\nconst myPreps = preps.filter(isMineUserId), otherPreps = preps.filter(r => !isMineUserId(r));\nconst myJobConns = jobConns.filter(isMineUserId), otherJobConns = jobConns.filter(r => !isMineUserId(r));\nconst myConns = conns.filter(isMineUserId);\n\n// jobs: shared table. Only delete a job no other user references anywhere.\nconst usedByOthers = new Set();\notherUJ.forEach(r => r.job_id && usedByOthers.add(String(r.job_id)));\notherDrafts.forEach(r => r.job_id && usedByOthers.add(String(r.job_id)));\notherLearning.forEach(r => parseArr(r.related_job_ids_json).forEach(j => usedByOthers.add(String(j))));\notherPreps.forEach(r => r.job_id && usedByOthers.add(String(r.job_id)));\notherJobConns.forEach(r => r.job_id && usedByOthers.add(String(r.job_id)));\nconst myJobIds = new Set();\nmyUJ.forEach(r => r.job_id && myJobIds.add(String(r.job_id)));\nmyDrafts.forEach(r => r.job_id && myJobIds.add(String(r.job_id)));\nconst jobIdsToDelete = [...myJobIds].filter(j => !usedByOthers.has(j));\nconst sharedJobsKept = [...myJobIds].filter(j => usedByOthers.has(j));\n\n// courses: per-user course ids are course_<users.id>_<role>; older courses are only removed if no other user's learning uses them.\nconst prefix = 'course_' + uid + '_';\nconst coursesOthers = new Set(otherLearning.map(r => String(r.course_id ?? '')));\nconst courseCandidates = new Set(myLearning.map(r => String(r.course_id ?? '')).filter(Boolean));\ncourses.forEach(c => { if (String(c.course_id ?? '').startsWith(prefix)) courseCandidates.add(String(c.course_id)); });\nconst courseIdsToDelete = new Set([...courseCandidates].filter(c => !coursesOthers.has(c)));\nconst sharedCoursesKept = [...courseCandidates].filter(c => coursesOthers.has(c));\nconst modulesOthers = new Set(otherLearning.map(r => String(r.module_id ?? '')));\nconst courseRows = courses.filter(c => courseIdsToDelete.has(String(c.course_id)));\nconst moduleRows = modules.filter(m => courseIdsToDelete.has(String(m.course_id)) && !modulesOthers.has(String(m.module_id)));\n\nconst ids = {\n  referral_drafts: myDrafts.map(r => r.id),\n  user_learning: myLearning.map(r => r.id),\n  course_modules: moduleRows.map(r => r.id),\n  courses: courseRows.map(r => r.id),\n  user_jobs: myUJ.map(r => r.id),\n  job_preparations: myPreps.map(r => r.id),\n  job_connections: myJobConns.map(r => r.id),\n  connections: myConns.map(r => r.id),\n};\nconst counts = {};\nfor (const k of Object.keys(ids)) counts[k] = ids[k].length;\ncounts.jobs = jobIdsToDelete.length;\n\nconst last = user.pipeline_started_at ? new Date(user.pipeline_started_at).getTime() : 0;\nconst pipelineMayBeRunning = !!last && (Date.now() - last) < 30 * 60 * 1000;\n\nconst response = {\n  success: true,\n  dry_run: dryRun,\n  status: dryRun ? 'preview' : 'deleted',\n  auth_user_id: A,\n  user_row_id: user.id,\n  deleted: counts,\n  kept_shared: { jobs: sharedJobsKept.length, courses: sharedCoursesKept.length },\n  reset_user_fields: ['pipeline_started_at', 'last_job_refresh_at', 'last_course_refresh_at'],\n  profile_kept: true,\n  pipeline_may_be_running: pipelineMayBeRunning,\n};\nreturn [{ json: { action: dryRun ? 'respond' : 'delete', response, ids, job_ids: jobIdsToDelete, user_row_id: user.id } }];\n"
+      }
+    },
+    {
+      "id": "f2453e2d-8d04-4075-976a-8f17f6ea62d4",
+      "name": "Delete?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2464,
+        96
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.action }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              },
+              "rightValue": "delete"
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "92be12c0-6f0a-4767-8d02-cdb944425785",
+      "name": "List referral_drafts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2688,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const ids = $('Build Plan').first().json.ids['referral_drafts'] || [];\nreturn ids.length ? ids.map(id => ({ json: { id } })) : [{ json: { id: -1 } }];"
+      }
+    },
+    {
+      "id": "ff3adcfd-f4cc-455f-8df2-0b6508a0ab82",
+      "name": "Delete referral_drafts",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        2912,
+        0
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "deleteRows",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "referral_drafts",
+          "cachedResultName": "referral_drafts"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "id",
+              "condition": "eq",
+              "keyValue": "={{ $json.id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "d015ca0f-aa2a-43d5-99c8-723fc447b69f",
+      "name": "List user_learning",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3136,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const ids = $('Build Plan').first().json.ids['user_learning'] || [];\nreturn ids.length ? ids.map(id => ({ json: { id } })) : [{ json: { id: -1 } }];"
+      }
+    },
+    {
+      "id": "907655aa-1662-4cdf-b89d-4c38fb8a9505",
+      "name": "Delete user_learning",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        3360,
+        0
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "deleteRows",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "user_learning",
+          "cachedResultName": "user_learning"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "id",
+              "condition": "eq",
+              "keyValue": "={{ $json.id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "f51383a7-e46f-4a5b-bbf0-af5daa0b7489",
+      "name": "List course_modules",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3584,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const ids = $('Build Plan').first().json.ids['course_modules'] || [];\nreturn ids.length ? ids.map(id => ({ json: { id } })) : [{ json: { id: -1 } }];"
+      }
+    },
+    {
+      "id": "55651927-c0c0-4520-a560-d37574f7292c",
+      "name": "Delete course_modules",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        3808,
+        0
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "deleteRows",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "course_modules",
+          "cachedResultName": "course_modules"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "id",
+              "condition": "eq",
+              "keyValue": "={{ $json.id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "8ce630e3-b813-488c-980c-bf19921af88e",
+      "name": "List courses",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4032,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const ids = $('Build Plan').first().json.ids['courses'] || [];\nreturn ids.length ? ids.map(id => ({ json: { id } })) : [{ json: { id: -1 } }];"
+      }
+    },
+    {
+      "id": "e55f66e2-00c6-47a2-a786-e11788ab3469",
+      "name": "Delete courses",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        4256,
+        0
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "deleteRows",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "courses",
+          "cachedResultName": "courses"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "id",
+              "condition": "eq",
+              "keyValue": "={{ $json.id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "69bd696f-8232-4534-a751-4f6b40532740",
+      "name": "List user_jobs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4480,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const ids = $('Build Plan').first().json.ids['user_jobs'] || [];\nreturn ids.length ? ids.map(id => ({ json: { id } })) : [{ json: { id: -1 } }];"
+      }
+    },
+    {
+      "id": "15294b5c-78f2-4d7b-b333-b1768341376e",
+      "name": "Delete user_jobs",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        4704,
+        0
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "deleteRows",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "user_jobs",
+          "cachedResultName": "user_jobs"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "id",
+              "condition": "eq",
+              "keyValue": "={{ $json.id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "ee85f9b0-8138-4208-a1fd-37862e62e2a8",
+      "name": "List job_preparations",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4928,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const ids = $('Build Plan').first().json.ids['job_preparations'] || [];\nreturn ids.length ? ids.map(id => ({ json: { id } })) : [{ json: { id: -1 } }];"
+      }
+    },
+    {
+      "id": "41b7b761-2dc5-42a6-bcba-e86412a684a3",
+      "name": "Delete job_preparations",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        5152,
+        0
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "deleteRows",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "job_preparations",
+          "cachedResultName": "job_preparations"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "id",
+              "condition": "eq",
+              "keyValue": "={{ $json.id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "aff19187-1c0a-413f-a870-33ecfef4b2e0",
+      "name": "List job_connections",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5376,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const ids = $('Build Plan').first().json.ids['job_connections'] || [];\nreturn ids.length ? ids.map(id => ({ json: { id } })) : [{ json: { id: -1 } }];"
+      }
+    },
+    {
+      "id": "73206852-3376-45d9-968e-cbef72f5636e",
+      "name": "Delete job_connections",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        5600,
+        0
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "deleteRows",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "job_connections",
+          "cachedResultName": "job_connections"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "id",
+              "condition": "eq",
+              "keyValue": "={{ $json.id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "7de28938-d4a7-4ab4-a0db-dcd71da417fb",
+      "name": "List connections",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5824,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const ids = $('Build Plan').first().json.ids['connections'] || [];\nreturn ids.length ? ids.map(id => ({ json: { id } })) : [{ json: { id: -1 } }];"
+      }
+    },
+    {
+      "id": "4fd66984-3b51-4483-a2c6-1b5f98c459eb",
+      "name": "Delete connections",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        6048,
+        0
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "deleteRows",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "connections",
+          "cachedResultName": "connections"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "id",
+              "condition": "eq",
+              "keyValue": "={{ $json.id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "7f30cfde-76ba-4440-8563-a77c0a7f4e31",
+      "name": "List jobs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6272,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const ids = $('Build Plan').first().json.job_ids || [];\nreturn ids.length ? ids.map(job_id => ({ json: { job_id } })) : [{ json: { job_id: '__none__' } }];"
+      }
+    },
+    {
+      "id": "d3359021-5674-4f9b-bd77-805a877c582f",
+      "name": "Delete jobs",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        6496,
+        0
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "deleteRows",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "jobs",
+          "cachedResultName": "jobs"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "job_id",
+              "condition": "eq",
+              "keyValue": "={{ $json.job_id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "959f4978-0447-4751-a7dc-c689857bfe28",
+      "name": "Reset pipeline timestamps",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        6720,
+        0
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "users",
+          "cachedResultName": "users"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "id",
+              "condition": "eq",
+              "keyValue": "={{ $('Build Plan').first().json.user_row_id }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "pipeline_started_at": "={{ null }}",
+            "last_job_refresh_at": "={{ null }}",
+            "last_course_refresh_at": "={{ null }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "pipeline_started_at",
+              "displayName": "pipeline_started_at",
+              "type": "dateTime",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "last_job_refresh_at",
+              "displayName": "last_job_refresh_at",
+              "type": "dateTime",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "last_course_refresh_at",
+              "displayName": "last_course_refresh_at",
+              "type": "dateTime",
+              "canBeUsedToMatch": false
+            }
+          ]
+        },
+        "options": {}
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "391ba379-53a3-49c3-ad62-5c011b3db08c",
+      "name": "Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6944,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// Counts the rows each delete node actually removed.\nconst plan = $('Build Plan').first().json;\nconst n = (name) => $(name).all().filter(i => i.json && typeof i.json.id === 'number' && i.json.id > 0).length;\nconst deleted = {\n  user_jobs: n('Delete user_jobs'),\n  jobs: n('Delete jobs'),\n  referral_drafts: n('Delete referral_drafts'),\n  user_learning: n('Delete user_learning'),\n  courses: n('Delete courses'),\n  course_modules: n('Delete course_modules'),\n  job_preparations: n('Delete job_preparations'),\n  job_connections: n('Delete job_connections'),\n  connections: n('Delete connections'),\n};\nreturn [{ json: { ...plan.response, deleted, planned: plan.response.deleted } }];\n"
+      }
+    },
+    {
+      "id": "78efc98d-2f0a-4fe7-b751-da82d5888c4e",
+      "name": "Respond Deleted",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        7168,
+        0
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseCode": 200
+        }
+      }
+    },
+    {
+      "id": "7b6a8f0a-3e41-453c-ab4e-dc5078415baa",
+      "name": "Respond Preview or Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        2688,
+        192
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json.response }}",
+        "options": {
+          "responseCode": 200
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook POST user-data-reset": {
+      "main": [
+        [
+          {
+            "node": "Find User",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find User": {
+      "main": [
+        [
+          {
+            "node": "Load all user_jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load all user_jobs": {
+      "main": [
+        [
+          {
+            "node": "Load all user_learning",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load all user_learning": {
+      "main": [
+        [
+          {
+            "node": "Load all courses",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load all courses": {
+      "main": [
+        [
+          {
+            "node": "Load all course_modules",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load all course_modules": {
+      "main": [
+        [
+          {
+            "node": "Load all referral_drafts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load all referral_drafts": {
+      "main": [
+        [
+          {
+            "node": "Load all job_preparations",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load all job_preparations": {
+      "main": [
+        [
+          {
+            "node": "Load all job_connections",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load all job_connections": {
+      "main": [
+        [
+          {
+            "node": "Load all connections",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load all connections": {
+      "main": [
+        [
+          {
+            "node": "Build Plan",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Plan": {
+      "main": [
+        [
+          {
+            "node": "Delete?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Delete?": {
+      "main": [
+        [
+          {
+            "node": "List referral_drafts",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Preview or Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "List referral_drafts": {
+      "main": [
+        [
+          {
+            "node": "Delete referral_drafts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Delete referral_drafts": {
+      "main": [
+        [
+          {
+            "node": "List user_learning",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "List user_learning": {
+      "main": [
+        [
+          {
+            "node": "Delete user_learning",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Delete user_learning": {
+      "main": [
+        [
+          {
+            "node": "List course_modules",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "List course_modules": {
+      "main": [
+        [
+          {
+            "node": "Delete course_modules",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Delete course_modules": {
+      "main": [
+        [
+          {
+            "node": "List courses",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "List courses": {
+      "main": [
+        [
+          {
+            "node": "Delete courses",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Delete courses": {
+      "main": [
+        [
+          {
+            "node": "List user_jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "List user_jobs": {
+      "main": [
+        [
+          {
+            "node": "Delete user_jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Delete user_jobs": {
+      "main": [
+        [
+          {
+            "node": "List job_preparations",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "List job_preparations": {
+      "main": [
+        [
+          {
+            "node": "Delete job_preparations",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Delete job_preparations": {
+      "main": [
+        [
+          {
+            "node": "List job_connections",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "List job_connections": {
+      "main": [
+        [
+          {
+            "node": "Delete job_connections",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Delete job_connections": {
+      "main": [
+        [
+          {
+            "node": "List connections",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "List connections": {
+      "main": [
+        [
+          {
+            "node": "Delete connections",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Delete connections": {
+      "main": [
+        [
+          {
+            "node": "List jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "List jobs": {
+      "main": [
+        [
+          {
+            "node": "Delete jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Delete jobs": {
+      "main": [
+        [
+          {
+            "node": "Reset pipeline timestamps",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reset pipeline timestamps": {
+      "main": [
+        [
+          {
+            "node": "Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Summary": {
+      "main": [
+        [
+          {
+            "node": "Respond Deleted",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}

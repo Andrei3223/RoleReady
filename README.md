@@ -7,7 +7,7 @@ An autonomous job-search agent. Upload your CV and target role, and it:
 3. **finds people who can refer you** at each company (fellow alumni, former colleagues, people on the same team) and drafts a short, personal message for each of them (never sent automatically),
 4. **creates a personal learning course** from the skill gaps across all your vacancies, with progress tracking.
 
-It re-checks for new vacancies every 2 hours and keeps your saved and hidden jobs.
+It re-checks for new vacancies every 2 hours and keeps your saved and hidden jobs!
 
 - **Web app:** <add the published Lovable URL>
 - **Apify Store:** [Career Agent Actor](https://apify.com/andrei_gruz/career-agent), the same agent for Apify users and AI agents (input: CV + role + city; output: dataset of vacancies with prep plans and referral contacts)
